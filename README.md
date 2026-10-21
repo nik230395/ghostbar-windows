@@ -3,37 +3,125 @@
 Windows-Port von [rbc33/Ghostbar](https://github.com/rbc33/Ghostbar): ein KI-Chat, der für Screen-Sharing und Aufnahmen unsichtbar ist.
 C# / .NET 10 (WinForms) + WebView2. Die Chat-Oberfläche ist das HTML des Originals.
 
-## Unsichtbar
+## Inhalt
 
-- Kein Taskleisten-Button, kein Tray-Icon, kein Alt+Tab-Eintrag (`WS_EX_TOOLWINDOW`).
-- Fenster ist von Capture ausgeschlossen (`SetWindowDisplayAffinity` / `WDA_EXCLUDEFROMCAPTURE`, Windows 10 2004+).
-- Bedienung nur über globale Hotkeys. Im Task-Manager erscheint `Ghostbar.exe` weiterhin.
+1. [So funktioniert es](#so-funktioniert-es)
+2. [Installation](#installation)
+3. [Erster Start](#erster-start)
+4. [API anbinden](#api-anbinden)
+5. [Bedienung](#bedienung)
+6. [Autostart](#autostart)
+7. [Spracheingabe (optional)](#spracheingabe-optional)
+8. [Update, Beenden, Deinstallieren](#update-beenden-deinstallieren)
+9. [Probleme lösen](#probleme-lösen)
+10. [Test-Checkliste](#test-checkliste)
 
-## Voraussetzungen
+## So funktioniert es
 
-- Windows 10 (Version 2004) oder neuer
-- [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) (x64)
-- WebView2 Runtime (auf Windows 10/11 meist vorinstalliert)
+- Es gibt **keine Installation im Sinne eines Setup-Programms**. Ghostbar ist ein Ordner mit `Ghostbar.exe`, den du irgendwo ablegst und startest.
+- Nach dem Start erscheint **nichts**: kein Fenster, kein Taskleisten-Button, kein Tray-Icon, kein Alt+Tab-Eintrag (`WS_EX_TOOLWINDOW`).
+- Das Fenster ist von Capture ausgeschlossen (`SetWindowDisplayAffinity` / `WDA_EXCLUDEFROMCAPTURE`, Windows 10 ab Version 2004).
+- Bedient wird nur über globale Hotkeys. Im Task-Manager (Details) erscheint `Ghostbar.exe` weiterhin, das lässt sich nicht verhindern.
 
-## Bauen
+## Installation
 
-Auf Windows:
+### Schritt 1: Voraussetzungen prüfen
+
+| Was | Wofür | Prüfen / Installieren |
+|---|---|---|
+| Windows 10 ab Version 2004 (Build 19041) oder Windows 11, 64 Bit | Capture-Schutz | `Win+R`, `winver` |
+| **.NET 10 Desktop Runtime (x64)** | Programm starten | `winget install Microsoft.DotNet.DesktopRuntime.10` oder [Download](https://dotnet.microsoft.com/download/dotnet/10.0) (".NET Desktop Runtime", x64) |
+| **WebView2 Runtime** | Chat-Oberfläche | Auf Windows 10/11 normalerweise vorinstalliert. Sonst: `winget install Microsoft.EdgeWebView2Runtime` |
+
+Prüfen, ob die .NET-Runtime da ist (PowerShell):
 
 ```powershell
+dotnet --list-runtimes
+```
+
+Es muss eine Zeile `Microsoft.WindowsDesktop.App 10.x.x` erscheinen. Ohne diese Zeile startet `Ghostbar.exe` still und zeigt nichts an.
+
+### Schritt 2: Ghostbar besorgen (eine Variante wählen)
+
+#### Variante A: fertiges Paket (am einfachsten)
+
+1. Auf der Seite [Releases](../../releases) die Datei `Ghostbar-win-x64.zip` herunterladen.
+2. Rechtsklick auf die ZIP, **Eigenschaften**, unten **Zulassen** anhaken (falls vorhanden), **OK**.
+3. ZIP entpacken, z. B. nach `C:\Tools\Ghostbar\`. Der **ganze Ordner** muss zusammenbleiben (neben `Ghostbar.exe` liegt `WebView2Loader.dll`).
+
+Gibt es noch kein Release, nimm Variante B oder C. Ein Release erzeugst du so (siehe Variante C für das ZIP):
+
+```bash
+gh release create v1.0.0 Ghostbar-win-x64.zip --title "Ghostbar 1.0.0" --notes "Erste Windows-Version"
+```
+
+#### Variante B: selbst bauen auf Windows
+
+1. [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) installieren (`winget install Microsoft.DotNet.SDK.10`).
+2. Repo holen und bauen (PowerShell):
+
+```powershell
+git clone https://github.com/nik230395/ghostbar-windows.git
+cd ghostbar-windows
 ./build.ps1
 ```
 
-Oder auf macOS/Linux (Cross-Build):
+Falls PowerShell das Skript blockiert: `powershell -ExecutionPolicy Bypass -File build.ps1`.
+
+3. Ergebnis ist der Ordner `publish\` mit `Ghostbar.exe`. Kopiere ihn komplett an einen festen Ort, z. B. `C:\Tools\Ghostbar\`.
+
+#### Variante C: auf macOS/Linux bauen und auf Windows kopieren
 
 ```bash
+git clone https://github.com/nik230395/ghostbar-windows.git
+cd ghostbar-windows
 ./build.sh
+cd publish && zip -r ../Ghostbar-win-x64.zip . && cd ..
 ```
 
-Ergebnis: `publish/Ghostbar.exe` (den ganzen `publish/`-Ordner kopieren, `WebView2Loader.dll` liegt daneben).
+`Ghostbar-win-x64.zip` auf den Windows-Rechner bringen (USB, Cloud, Mail) und wie in Variante A entpacken.
+
+### Schritt 3: Windows-Warnung (SmartScreen)
+
+Die App ist nicht signiert. Beim ersten Start kann „Der Computer wurde durch Windows geschützt“ erscheinen. Dann **Weitere Informationen**, **Trotzdem ausführen**. Das passiert nicht, wenn du selbst gebaut hast (Variante B).
+
+## Erster Start
+
+1. `Ghostbar.exe` doppelklicken. **Es passiert sichtbar nichts, das ist richtig.**
+2. **Ctrl+Shift+Space** drücken, der Chat öffnet sich.
+3. Öffnet sich nichts: siehe [Probleme lösen](#probleme-lösen).
+4. Zahnrad oben im Chat öffnen und ein Backend einrichten (nächster Abschnitt).
+
+## API anbinden
+
+Ablauf für jedes Backend: **Ctrl+Shift+Space**, Zahnrad, Backend wählen (die URL füllt sich selbst), Key einfügen, **Test**, **Save**. Die Modellliste lädt danach automatisch, das Modell wählst du im Chat-Header.
+
+| Backend | Key nötig | Hinweis |
+|---|---|---|
+| Ollama | nein | Lokal, `http://localhost:11434` |
+| OpenAI | ja | |
+| Anthropic | ja | |
+| Google Gemini | ja | Kostenloser Key in AI Studio |
+| OpenRouter | ja | |
+| NVIDIA NIM | ja | Kostenloser Tarif verfügbar |
+| llama.cpp, LM Studio, vLLM | nein | Lokale Server |
+
+Jeder OpenAI-kompatible Server funktioniert: Backend **OpenAI** wählen und die URL ändern.
+
+### Beispiel: Gemini (kostenloser Key)
+
+1. Auf <https://aistudio.google.com/api-keys> anmelden und **Create API key** wählen (Name z. B. `ghostbar`, Standardprojekt). Key kopieren.
+2. **Ctrl+Shift+Space**, Zahnrad.
+3. Backend **Google Gemini** wählen, Key einfügen, **Test** (muss „✓ Connected“ zeigen), **Save**.
+4. Im Chat-Header ein Modell wählen, z. B. eines mit `flash` im Namen.
+
+Gemini läuft über den OpenAI-kompatiblen Endpunkt `https://generativelanguage.googleapis.com/v1beta/openai`.
+
+Der Key liegt mit Windows-DPAPI verschlüsselt in `%APPDATA%\Ghostbar\settings.json` und ist nur für deinen Windows-Benutzer lesbar.
 
 ## Bedienung
 
-| Aktion | Standard (anpassbar in Settings) |
+| Aktion | Standard (in den Settings änderbar) |
 |---|---|
 | Fenster ein/aus (global) | Ctrl+Shift+Space |
 | Mikrofon (im Chat) | Ctrl+Shift+M |
@@ -41,27 +129,47 @@ Ergebnis: `publish/Ghostbar.exe` (den ganzen `publish/`-Ordner kopieren, `WebVie
 | Nachricht senden | Enter |
 | Neue Zeile | Shift+Enter |
 
-Settings: Zahnrad im Chat. Dort auch **Quit Ghostbar** zum Beenden.
-Einstellungen liegen in `%APPDATA%\Ghostbar\settings.json`, der API-Key ist per DPAPI verschlüsselt.
+- Verschieben: Header (obere Leiste) ziehen. Größe ändern: an den Rändern ziehen. Position und Größe bleiben gespeichert.
+- Zahnrad: Settings. Dort steht auch **Quit Ghostbar** zum Beenden.
+- × im Chat versteckt nur das Fenster, die App läuft weiter.
 
-## Backends
+## Autostart
 
-Ollama, OpenAI, Anthropic, Google Gemini, OpenRouter sowie alle OpenAI-kompatiblen Server (NVIDIA NIM, llama.cpp, LM Studio, vLLM).
+Damit Ghostbar nach jedem Anmelden bereitsteht:
 
-## Beispiel: Gemini (kostenloser Key)
+1. `Win+R`, `shell:startup`, Enter. Der Autostart-Ordner öffnet sich.
+2. Rechtsklick auf `Ghostbar.exe`, **Verknüpfung erstellen**, die Verknüpfung in den Autostart-Ordner verschieben.
 
-1. [Ghostbar-Release](../../releases) bzw. `publish/`-Ordner auf den Windows-Rechner kopieren und `Ghostbar.exe` starten (es erscheint nichts, das ist gewollt).
-2. Auf <https://aistudio.google.com/api-keys> anmelden und **Create API key** wählen (Name z. B. `ghostbar`, Standardprojekt). Key kopieren.
-3. **Ctrl+Shift+Space** drücken, dann das Zahnrad im Chat öffnen.
-4. Backend **Google Gemini** auswählen, Key einfügen, **Test**, dann **Save**.
-5. Im Chat-Header ein Modell wählen, z. B. eines mit `flash` im Namen.
-6. Fertig: Das App-Icon verstecken ist nicht nötig, es gibt keins.
-
-Gemini wird über den OpenAI-kompatiblen Endpunkt `https://generativelanguage.googleapis.com/v1beta/openai` angesprochen. Für andere Anbieter gilt derselbe Ablauf: Backend wählen, Key einfügen, Save.
+Entfernen: Verknüpfung dort löschen.
 
 ## Spracheingabe (optional)
 
-`whisper-cli.exe` ([whisper.cpp Releases](https://github.com/ggml-org/whisper.cpp/releases)) und ein Modell (`ggml-base.bin`) nach `%LOCALAPPDATA%\Ghostbar\whisper\` legen (oder neben `Ghostbar.exe` / in den PATH).
+Läuft komplett lokal über [whisper.cpp](https://github.com/ggml-org/whisper.cpp).
+
+1. Von den [whisper.cpp Releases](https://github.com/ggml-org/whisper.cpp/releases) die Windows-x64-ZIP laden. Benötigt wird `whisper-cli.exe` (plus die mitgelieferten DLLs).
+2. Ein Modell laden, z. B. `ggml-base.bin` (ca. 150 MB) von <https://huggingface.co/ggerganov/whisper.cpp>.
+3. Alles in einen Ordner legen: `%LOCALAPPDATA%\Ghostbar\whisper\` (alternativ neben `Ghostbar.exe` oder in den PATH).
+4. Im Chat **Ctrl+Shift+M** drücken, sprechen, nochmal drücken. Der Text wird transkribiert und gesendet.
+
+## Update, Beenden, Deinstallieren
+
+- **Beenden:** Settings (Zahnrad), **Quit Ghostbar**. Notfalls Task-Manager, Tab Details, `Ghostbar.exe` beenden.
+- **Update:** Ghostbar beenden, Ordner durch die neue Version ersetzen. Einstellungen bleiben erhalten, sie liegen nicht im Programmordner.
+- **Deinstallieren:** Ghostbar beenden, Programmordner löschen, Autostart-Verknüpfung löschen. Optional auch `%APPDATA%\Ghostbar` (Einstellungen) und `%LOCALAPPDATA%\Ghostbar` (WebView-Daten, Whisper) löschen.
+
+## Probleme lösen
+
+| Symptom | Ursache / Lösung |
+|---|---|
+| Hotkey tut nichts | Läuft die App? Task-Manager, Details, `Ghostbar.exe`. Ist sie da, belegt ein anderes Programm das Kürzel. In den Settings ein anderes Kürzel setzen. |
+| `Ghostbar.exe` startet nicht, keine Meldung | .NET 10 Desktop Runtime fehlt: `dotnet --list-runtimes` prüfen. |
+| Chat bleibt leer oder weiß | WebView2 Runtime fehlt oder ist zu alt: `winget install Microsoft.EdgeWebView2Runtime`. |
+| Test zeigt „HTTP 401“ | Key falsch oder für anderes Backend. |
+| Test zeigt Verbindungsfehler | Server läuft nicht (Ollama/LM Studio starten) oder URL falsch. |
+| Modellliste leer („no models“) | Test zuerst ausführen, dann Save. Bei Ollama muss mindestens ein Modell geladen sein. |
+| Mikrofon: „No microphone available“ | Standard-Mikrofon in den Windows-Sound-Einstellungen prüfen. |
+| Mikrofon ohne Ergebnis | whisper nicht gefunden, siehe [Spracheingabe](#spracheingabe-optional). |
+| Fenster in Aufnahme sichtbar | Windows älter als 10 Version 2004. Mit `winver` prüfen. |
 
 ## Test-Checkliste
 
@@ -71,11 +179,14 @@ Gemini wird über den OpenAI-kompatiblen Endpunkt `https://generativelanguage.go
 4. Header ziehen, Ränder ziehen; Position bleibt nach Neustart.
 5. Ollama oder API-Backend streamt Antworten, Modellliste lädt.
 6. Screenshot-Hotkey hängt Bild an, Vision-Modell antwortet.
-7. Settings → Quit beendet den Prozess.
+7. Settings, Quit beendet den Prozess.
 
 ## Unterschiede zum macOS-Original
 
 - Hotkeys nutzen Ctrl+Shift statt ⌘⌥ (Ctrl+Alt ist unter Windows AltGr).
 - Hotkeys brauchen immer eine Taste; Modifier-only-Kürzel gibt es nicht.
 - Modellauswahl erfolgt im Chat-Header; sie wird nicht über Neustarts gespeichert.
-- Lizenz: MIT, Original © rbc33.
+
+## Lizenz
+
+MIT, Original © rbc33.
