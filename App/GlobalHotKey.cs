@@ -1,5 +1,6 @@
 using Ghostbar.Config;
 using Ghostbar.Native;
+using Ghostbar.Services;
 
 namespace Ghostbar.App;
 
@@ -7,6 +8,8 @@ class GlobalHotKey : NativeWindow, IDisposable
 {
     private const int Id = 1;
     private readonly Action callback;
+
+    public bool Registered { get; private set; }
 
     public GlobalHotKey(Action callback)
     {
@@ -16,12 +19,15 @@ class GlobalHotKey : NativeWindow, IDisposable
 
     public bool Register(KeyChord s)
     {
+        Registered = false;
         Win32.UnregisterHotKey(Handle, Id);
         uint mods = Win32.MOD_NOREPEAT;
         if (s.Ctrl)  mods |= Win32.MOD_CONTROL;
         if (s.Alt)   mods |= Win32.MOD_ALT;
         if (s.Shift) mods |= Win32.MOD_SHIFT;
-        return Win32.RegisterHotKey(Handle, Id, mods, (uint)s.Key);
+        Registered = Win32.RegisterHotKey(Handle, Id, mods, (uint)s.Key);
+        Logger.Write($"hotkey {s.DisplayString} registered={Registered}");
+        return Registered;
     }
 
     protected override void WndProc(ref Message m)

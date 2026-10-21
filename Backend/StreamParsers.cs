@@ -2,7 +2,7 @@ using System.Text.Json.Nodes;
 
 namespace Ghostbar.Backend;
 
-interface IStreamParser
+public interface IStreamParser
 {
     string? Token(string line);
 }
@@ -17,39 +17,45 @@ static class SseLine
         try { return JsonNode.Parse(text); }
         catch (System.Text.Json.JsonException) { return null; }
     }
+
+    public static JsonNode? At(JsonNode? node, string key) => node is JsonObject o ? o[key] : null;
+
+    public static string? Str(JsonNode? node) =>
+        node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
 }
 
-class OllamaStreamParser : IStreamParser
+public class OllamaStreamParser : IStreamParser
 {
     public string? Token(string line)
     {
         var j = SseLine.Parse(line);
-        return j?["message"]?["content"]?.GetValue<string>() ?? j?["response"]?.GetValue<string>();
+        return SseLine.Str(SseLine.At(SseLine.At(j, "message"), "content")) ?? SseLine.Str(SseLine.At(j, "response"));
     }
 }
 
-class AnthropicStreamParser : IStreamParser
+public class AnthropicStreamParser : IStreamParser
 {
     public string? Token(string line)
     {
         var s = SseLine.Payload(line);
         if (s.Length == 0) return null;
         var j = SseLine.Parse(s);
-        if (j?["type"]?.GetValue<string>() != "content_block_delta") return null;
-        if (j["delta"]?["type"]?.GetValue<string>() != "text_delta") return null;
-        return j["delta"]?["text"]?.GetValue<string>();
+        if (SseLine.Str(SseLine.At(j, "type")) != "content_block_delta") return null;
+        if (SseLine.Str(SseLine.At(SseLine.At(j, "delta"), "type")) != "text_delta") return null;
+        return SseLine.Str(SseLine.At(SseLine.At(j, "delta"), "text"));
     }
 }
 
-class OpenAIStreamParser : IStreamParser
+public class OpenAIStreamParser : IStreamParser
 {
     public string? Token(string line)
     {
         var s = SseLine.Payload(line);
         if (s == "[DONE]" || s.Length == 0) return null;
-        var delta = SseLine.Parse(s)?["choices"]?[0]?["delta"];
-        var content = delta?["content"]?.GetValue<string>();
+        var choices = SseLine.At(SseLine.Parse(s), "choices") as JsonArray;
+        var delta = choices is { Count: > 0 } ? SseLine.At(choices[0], "delta") : null;
+        var content = SseLine.Str(SseLine.At(delta, "content"));
         if (!string.IsNullOrEmpty(content)) return content;
-        return delta?["reasoning_content"]?.GetValue<string>();
+        return SseLine.Str(SseLine.At(delta, "reasoning_content"));
     }
 }

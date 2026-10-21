@@ -171,6 +171,68 @@ Läuft komplett lokal über [whisper.cpp](https://github.com/ggml-org/whisper.cp
 | Mikrofon ohne Ergebnis | whisper nicht gefunden, siehe [Spracheingabe](#spracheingabe-optional). |
 | Fenster in Aufnahme sichtbar | Windows älter als 10 Version 2004. Mit `winver` prüfen. |
 
+## Fehlersuche: Diagnose und Log
+
+Weil die App unsichtbar ist, gibt es zwei Hilfen, um die Ursache eines Problems einzugrenzen.
+
+**1. Diagnose in den Settings:** Ctrl+Shift+Space, Zahnrad, Button **Diagnose**. Es erscheint eine Liste mit `OK` oder `BAD` pro Zeile:
+
+| Zeile | Bedeutet |
+|---|---|
+| Windows build | Mindestens 19041 nötig, sonst kein Capture-Schutz |
+| .NET runtime | Installierte Laufzeit |
+| WebView2 runtime | Version oder „not installed“ |
+| Toggle hotkey | Ob das Tastenkürzel angemeldet werden konnte (BAD = ein anderes Programm belegt es) |
+| Capture protection | `0x11` = Fenster ist für Aufnahmen unsichtbar |
+| Backend / API key | Eingestellte URL, ob ein Key gesetzt ist (nur die Länge, nie der Key) |
+| Backend reachable | Antwort des Servers, mit Hinweis auf die Ursache |
+| whisper-cli.exe / model / Microphones | Zustand der Spracheingabe |
+
+Den Text kannst du markieren, kopieren und weitergeben.
+
+**2. Logdatei:** `%LOCALAPPDATA%\Ghostbar\ghostbar.log` (Windows-Explorer: Adresszeile, Pfad einfügen). Sie enthält Start, Hotkey, WebView2, Modellabruf, Fehler der API, Screenshot und Mikrofon. API-Keys und Chat-Inhalte werden nicht geloggt. Beispiele:
+
+```
+2026-10-21 20:50:01.123 hotkey Ctrl+Shift+Space registered=False   -> Kürzel belegt
+2026-10-21 20:50:05.456 webview2 ready version=130.0.2849.80       -> Chat-Oberfläche läuft
+2026-10-21 20:50:09.001 stream failed HTTP 401 - API key missing…  -> Key falsch
+2026-10-21 20:50:12.777 models fetch failed backend=Ollama …       -> Server nicht erreichbar
+```
+
+**Fehlermeldungen im Chat und bei „Test“** nennen die Ursache direkt:
+
+| Meldung | Ursache |
+|---|---|
+| `HTTP 401/403 - API key missing or rejected` | Key fehlt oder falsch |
+| `HTTP 404 - Not found. Check the URL … and the model name` | URL ohne `/v1` oder falscher Modellname |
+| `HTTP 429 - Rate limit or quota exceeded` | Limit oder Guthaben aufgebraucht |
+| `HTTP 5xx - The server reported an internal error` | Problem beim Anbieter |
+| `Connection refused at … Is the server running?` | Ollama/LM Studio nicht gestartet, falscher Port |
+| `Host not found` | Tippfehler in der URL oder kein Internet |
+| `Invalid URL` | URL unvollständig (`http://` fehlt) |
+| `No answer … (timed out)` | Server antwortet 30 Sekunden lang nicht |
+| `The backend answered but sent no text` | Antwort ohne Inhalt, meist falscher Modellname |
+
+## Automatische Tests
+
+Ich selbst habe kein Windows-Gerät, deshalb prüfen zwei Testarten die App, ohne dass du etwas installieren musst.
+
+**Unit-Tests (`tests/Ghostbar.Tests`, 44 Tests):** Sie starten einen Fake-Server und prüfen die Kommunikation mit Ollama, OpenAI-kompatiblen Servern und Anthropic: Streaming, Header (`Authorization`, `x-api-key`), Systemprompt, Bild-Anhang, Modellliste, jede Fehlermeldung aus der Tabelle oben, Abbruch und Timeout. Sie laufen auch auf dem Mac/Linux:
+
+```bash
+dotnet test tests/Ghostbar.Tests
+```
+
+**Windows-Test auf GitHub (`.github/workflows/ci.yml`):** Bei jedem Push startet GitHub einen echten Windows-Rechner und führt aus:
+
+1. Unit-Tests
+2. Build
+3. Smoke-Test (`scripts/smoke-test.ps1`): startet `Ghostbar.exe`, drückt per Tastatur Ctrl+Shift+Space und prüft, ob der Prozess läuft, nach dem Start kein Fenster sichtbar ist, der Hotkey ankommt, WebView2 startet, die Chat-Seite lädt, die Verbindung Oberfläche zu App funktioniert, das Fenster nicht in Taskleiste/Alt+Tab erscheint (`WS_EX_TOOLWINDOW`), der Capture-Schutz gesetzt ist und der zweite Hotkey das Fenster versteckt.
+
+Ergebnis ansehen: GitHub, Reiter **Actions**, letzten Lauf öffnen. Die Tabelle steht oben in der Zusammenfassung, darunter als Download `ghostbar-ci` (fertiges ZIP, `ghostbar.log`, Screenshot).
+
+Was die Tests **nicht** beweisen: Ob das Fenster in Zoom/Teams/OBS wirklich fehlt (der Test prüft nur, dass Windows das Capture-Flag gesetzt hat, und wertet einen Screenshot nur informativ aus), und wie sich echte API-Server, Mikrofon und whisper verhalten.
+
 ## Test-Checkliste
 
 1. `Ghostbar.exe` starten: nichts sichtbar (kein Fenster, kein Taskleisten-/Tray-Symbol).

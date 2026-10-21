@@ -50,6 +50,19 @@ class ChatForm : StealthForm
 
     private async Task InitWebViewAsync()
     {
+        try
+        {
+            await StartWebViewAsync();
+        }
+        catch (Exception e) when (e is WebView2RuntimeNotFoundException or System.Runtime.InteropServices.COMException or InvalidOperationException)
+        {
+            Logger.Error("webview2 init", e);
+            MessageBox.Show("The WebView2 runtime is missing or broken, so the chat cannot be shown.\n\nInstall it with:\nwinget install Microsoft.EdgeWebView2Runtime", "Ghostbar", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private async Task StartWebViewAsync()
+    {
         var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Ghostbar", "webview");
         var env = await CoreWebView2Environment.CreateAsync(userDataFolder: dataDir);
         await web.EnsureCoreWebView2Async(env);
@@ -60,6 +73,8 @@ class ChatForm : StealthForm
         core.Settings.IsZoomControlEnabled = false;
         await core.AddScriptToExecuteOnDocumentCreatedAsync(BridgeScript);
         core.WebMessageReceived += OnWebMessage;
+        core.NavigationCompleted += (_, a) => Logger.Write($"page loaded success={a.IsSuccess} status={a.WebErrorStatus}");
+        Logger.Write($"webview2 ready version={env.BrowserVersionString}");
         core.NavigateToString(LoadHtml());
     }
 
@@ -145,12 +160,13 @@ class ChatForm : StealthForm
         var cfg = Settings.Current;
         try
         {
-            var names = await BackendClient.FetchModelsAsync(cfg);
+            var names = await BackendClient.FetchModelsAsync(cfg.ToBackendOptions());
             var kind = cfg.BackendType == BackendType.Ollama ? "ollama" : "openai";
             Script($"receiveModels({JsonSerializer.Serialize(names)},'{kind}')");
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {
+            Logger.Write($"models fetch failed backend={cfg.BackendType} url={cfg.BackendUrl}: {BackendClient.DescribeException(e, cfg.BackendUrl).Split('\n')[0]}");
             Script("receiveModels([],'" + (cfg.BackendType == BackendType.Ollama ? "ollama" : "openai") + "')");
         }
     }
@@ -159,6 +175,8 @@ class ChatForm : StealthForm
     {
         var msg = JsonNode.Parse(e.WebMessageAsJson);
         var body = msg?["body"];
+        var name = msg?["name"]?.GetValue<string>();
+        if (name is not "startDrag") Logger.Write($"bridge {name}");
         switch (msg?["name"]?.GetValue<string>())
         {
             case "sendMessage": SendMessage(body); break;
@@ -197,7 +215,7 @@ class ChatForm : StealthForm
 
         streamCts?.Cancel();
         var cts = streamCts = new CancellationTokenSource();
-        _ = BackendClient.StreamAsync(messages, model, image,
+        _ = BackendClient.StreamAsync(messages, model, image, Settings.Current.ToBackendOptions(),
             token => Script($"appendToken({Js(token)})"),
             isError => Script($"endStream({(isError ? "true" : "false")})"),
             cts.Token);
@@ -208,6 +226,7 @@ class ChatForm : StealthForm
         Task.Run(() =>
         {
             storedScreenshot = ScreenCapture.CaptureBase64();
+            Logger.Write($"screenshot captured={storedScreenshot != null} bytes={storedScreenshot?.Length ?? 0}");
             Script(storedScreenshot != null ? "onScreenshotCaptured()" : "onScreenshotError()");
         });
     }
@@ -223,7 +242,8 @@ class ChatForm : StealthForm
         }
         catch (Exception e) when (e is NAudio.MmException or InvalidOperationException)
         {
-            Script($"onMicError({Js("No microphone available.")})");
+            Logger.Error("mic", e);
+            Script($"onMicError({Js("No microphone available. Check the default input device in Windows sound settings.")})");
         }
     }
 
@@ -231,11 +251,13 @@ class ChatForm : StealthForm
     {
         if (!isRecording) return;
         isRecording = false;
+        Logger.Write("recording stopped");
         recorder.OnDone = async path =>
         {
             if (path == null) { Script("onTranscription(null)"); return; }
             Script("onTranscribing()");
             var text = await Transcriber.TranscribeAsync(path);
+            Logger.Write($"transcription result={(text == null ? "none" : "ok")}");
             Script(text == null ? "onTranscription(null)" : $"onTranscription({Js(text)})");
         };
         recorder.Stop();

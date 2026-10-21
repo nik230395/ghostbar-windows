@@ -2,10 +2,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Ghostbar.Backend;
 
 namespace Ghostbar.Config;
-
-public enum BackendType { Ollama, OpenAI, Anthropic, OpenRouter }
 
 public class Settings
 {
@@ -22,7 +21,7 @@ public class Settings
 
     private static readonly string Dir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Ghostbar");
-    private static readonly string FilePath = Path.Combine(Dir, "settings.json");
+    public static readonly string FilePath = Path.Combine(Dir, "settings.json");
 
     public static Settings Current { get; private set; } = Load();
 
@@ -48,6 +47,8 @@ public class Settings
                     Encoding.UTF8.GetBytes(value), null, DataProtectionScope.CurrentUser));
         }
     }
+
+    public BackendOptions ToBackendOptions() => new(BackendType, BackendUrl, ApiKey, SystemPrompt);
 
     private static Settings Load()
     {

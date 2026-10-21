@@ -26,7 +26,8 @@ class StealthForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        Win32.SetWindowDisplayAffinity(Handle, Win32.WDA_EXCLUDEFROMCAPTURE);
+        var ok = Win32.SetWindowDisplayAffinity(Handle, Win32.WDA_EXCLUDEFROMCAPTURE);
+        Services.Logger.Write($"capture protection {GetType().Name} applied={ok}");
     }
 
     public void ShowAndFocus()

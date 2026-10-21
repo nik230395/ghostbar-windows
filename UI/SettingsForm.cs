@@ -1,6 +1,7 @@
 using Ghostbar.App;
 using Ghostbar.Backend;
 using Ghostbar.Config;
+using Ghostbar.Services;
 
 namespace Ghostbar.UI;
 
@@ -35,6 +36,11 @@ class SettingsForm : StealthForm
     private readonly ShortcutBox captureBox;
     private readonly TextBox systemBox = Multiline();
     private readonly TextBox screenshotBox = Multiline();
+    private readonly TextBox report = new()
+    {
+        Multiline = true, ReadOnly = true, Width = 420, Height = 150, ScrollBars = ScrollBars.Both,
+        WordWrap = false, Font = new Font("Consolas", 8),
+    };
 
     public SettingsForm(GhostbarContext context)
     {
@@ -76,6 +82,8 @@ class SettingsForm : StealthForm
         var defaultButton = new Button { Text = "Default", AutoSize = true };
         defaultButton.Click += (_, _) => screenshotBox.Text = DefaultScreenshotPrompt;
 
+        var diagnose = new Button { Text = "Diagnose", AutoSize = true };
+        diagnose.Click += async (_, _) => await RunDiagnosticsAsync();
         var save = new Button { Text = "Save", AutoSize = true, DialogResult = DialogResult.OK };
         var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
         var quit = new Button { Text = "Quit Ghostbar", AutoSize = true, ForeColor = Color.Salmon };
@@ -100,11 +108,13 @@ class SettingsForm : StealthForm
             Caption("Screenshot (in chat)"), captureBox,
             Caption("System prompt"), systemBox,
             Row(Caption("Screenshot prompt"), defaultButton), screenshotBox,
+            Row(diagnose, new Label { Text = "Run checks, copy the result when asking for help", AutoSize = true, ForeColor = Color.Gray }),
+            report,
             Row(quit, new Label { Width = 120 }, cancel, save),
         ]);
         Controls.Add(layout);
 
-        foreach (var box in new[] { urlBox, keyBox, systemBox, screenshotBox, toggleBox, micBox, captureBox })
+        foreach (var box in new[] { urlBox, keyBox, systemBox, screenshotBox, toggleBox, micBox, captureBox, report })
         {
             box.BackColor = Color.FromArgb(30, 32, 38);
             box.ForeColor = Color.White;
@@ -137,10 +147,18 @@ class SettingsForm : StealthForm
     {
         status.ForeColor = Color.Gray;
         status.Text = "Testing…";
-        var result = await BackendClient.TestAsync(
+        var options = new BackendOptions(
             Presets[backendList.SelectedIndex].Type, urlBox.Text.Trim(), keyBox.Text.Trim());
+        var result = await BackendClient.TestAsync(options);
+        Logger.Write($"settings test backend={options.Type} result={result.Split('\n')[0]}");
         status.ForeColor = result == "ok" ? Color.LightGreen : Color.Salmon;
-        status.Text = result == "ok" ? "✓ Connected" : $"✗ {result}";
+        status.Text = result == "ok" ? "✓ Connected" : $"✗ {result.Replace('\n', ' ')}";
+    }
+
+    private async Task RunDiagnosticsAsync()
+    {
+        report.Text = "Running checks…";
+        report.Text = await Diagnostics.BuildReportAsync(context.ChatHandle, context.HotKeyRegistered);
     }
 
     private void Save()

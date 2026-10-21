@@ -12,6 +12,7 @@
     <AssemblyName>Ghostbar</AssemblyName>
     <RootNamespace>Ghostbar</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <DefaultItemExcludes>$(DefaultItemExcludes);tests/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

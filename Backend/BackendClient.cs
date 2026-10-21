@@ -1,93 +1,131 @@
+using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json.Nodes;
-using Ghostbar.Config;
 
 namespace Ghostbar.Backend;
 
-class BackendClient
+public static class BackendClient
 {
-    private const string AnthropicDefaultUrl = "https://api.anthropic.com/v1";
-    private static readonly TimeSpan IdleTimeout = TimeSpan.FromSeconds(30);
+    public const string AnthropicDefaultUrl = "https://api.anthropic.com/v1";
     private static readonly HttpClient Http = new() { Timeout = Timeout.InfiniteTimeSpan };
 
-    public static string ModelsEndpoint(BackendType type, string url) =>
-        type == BackendType.Ollama ? $"{url}/api/tags" : $"{url}/models";
+    public static Action<string> Log { get; set; } = _ => { };
+    public static TimeSpan IdleTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
-    public static HttpRequestMessage ModelsRequest(BackendType type, string url, string apiKey)
+    public static string ModelsEndpoint(BackendOptions o) =>
+        o.Type == BackendType.Ollama ? $"{BaseUrl(o)}/api/tags" : $"{BaseUrl(o)}/models";
+
+    private static string BaseUrl(BackendOptions o) =>
+        o.Type == BackendType.Anthropic && o.Url.Length == 0 ? AnthropicDefaultUrl : o.Url.TrimEnd('/');
+
+    public static HttpRequestMessage ModelsRequest(BackendOptions o)
     {
-        var req = new HttpRequestMessage(HttpMethod.Get, ModelsEndpoint(type, url));
-        if (type == BackendType.Anthropic)
-        {
-            if (apiKey.Length > 0) req.Headers.Add("x-api-key", apiKey);
-            req.Headers.Add("anthropic-version", "2023-06-01");
-        }
-        else if (apiKey.Length > 0)
-        {
-            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-        }
+        var req = new HttpRequestMessage(HttpMethod.Get, ModelsEndpoint(o));
+        ApplyAuth(req, o);
         return req;
     }
 
-    public static async Task<List<string>> FetchModelsAsync(Settings cfg)
+    private static void ApplyAuth(HttpRequestMessage req, BackendOptions o)
     {
-        var url = cfg.BackendType == BackendType.Anthropic && cfg.BackendUrl.Length == 0
-            ? AnthropicDefaultUrl : cfg.BackendUrl;
+        if (o.Type == BackendType.Anthropic)
+        {
+            req.Headers.Add("x-api-key", o.ApiKey);
+            req.Headers.Add("anthropic-version", "2023-06-01");
+        }
+        else if (o.ApiKey.Length > 0)
+        {
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", o.ApiKey);
+        }
+    }
+
+    public static string StatusHint(int code) => code switch
+    {
+        401 or 403 => "API key missing or rejected. Check the key in Settings.",
+        404 => "Not found. Check the URL (it usually ends in /v1) and the model name.",
+        429 => "Rate limit or quota exceeded.",
+        >= 500 => "The server reported an internal error.",
+        _ => "",
+    };
+
+    public static string DescribeException(Exception e, string url) => e switch
+    {
+        HttpRequestException { InnerException: SocketException { SocketErrorCode: SocketError.ConnectionRefused } } =>
+            $"Connection refused at {url}. Is the server running?",
+        HttpRequestException { InnerException: SocketException { SocketErrorCode: SocketError.HostNotFound } } =>
+            $"Host not found: {url}. Check the URL and your internet connection.",
+        HttpRequestException => $"Cannot reach {url}: {e.Message}",
+        UriFormatException or InvalidOperationException => $"Invalid URL: {url}",
+        OperationCanceledException => $"No answer from {url} (timed out).",
+        _ => e.Message,
+    };
+
+    private static async Task<string> StatusMessage(HttpResponseMessage resp, CancellationToken ct)
+    {
+        var body = (await resp.Content.ReadAsStringAsync(ct)).Trim();
+        var detail = body.Length > 200 ? body[..200] : body;
+        var code = (int)resp.StatusCode;
+        var hint = StatusHint(code);
+        var text = $"HTTP {code}";
+        if (hint.Length > 0) text += $" - {hint}";
+        if (detail.Length > 0) text += $"\n{detail}";
+        return text;
+    }
+
+    public static async Task<List<string>> FetchModelsAsync(BackendOptions o)
+    {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        using var req = ModelsRequest(cfg.BackendType, url, cfg.ApiKey);
+        using var req = ModelsRequest(o);
         using var resp = await Http.SendAsync(req, cts.Token);
+        if (!resp.IsSuccessStatusCode) throw new HttpRequestException(await StatusMessage(resp, cts.Token));
         var json = JsonNode.Parse(await resp.Content.ReadAsStringAsync(cts.Token));
-        if (cfg.BackendType == BackendType.Ollama)
+        if (o.Type == BackendType.Ollama)
             return json?["models"]?.AsArray().Select(m => m?["name"]?.GetValue<string>()).OfType<string>().ToList() ?? [];
         return json?["data"]?.AsArray().Select(m => m?["id"]?.GetValue<string>()).OfType<string>().Order().ToList() ?? [];
     }
 
-    public static async Task<string> TestAsync(BackendType type, string url, string apiKey)
+    public static async Task<string> TestAsync(BackendOptions o)
     {
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            using var req = ModelsRequest(type, url, apiKey);
+            using var req = ModelsRequest(o);
             using var resp = await Http.SendAsync(req, cts.Token);
-            return resp.IsSuccessStatusCode ? "ok" : $"HTTP {(int)resp.StatusCode}";
+            return resp.IsSuccessStatusCode ? "ok" : await StatusMessage(resp, cts.Token);
         }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidOperationException or UriFormatException)
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException or InvalidOperationException or UriFormatException)
         {
-            return e.Message;
+            return DescribeException(e, o.Url);
         }
     }
 
-    public static async Task StreamAsync(JsonArray messages, string model, string? image,
+    public static async Task StreamAsync(JsonArray messages, string model, string? image, BackendOptions o,
         Action<string> onToken, Action<bool> onEnd, CancellationToken ct)
     {
-        var cfg = Settings.Current;
-        var msgs = new JsonArray(messages.Select(m => m!.DeepClone()).ToArray());
-        if (cfg.SystemPrompt.Length > 0)
-            msgs.Insert(0, new JsonObject { ["role"] = "system", ["content"] = cfg.SystemPrompt });
-
-        var (req, parser) = cfg.BackendType switch
-        {
-            BackendType.Ollama => (OllamaRequest(msgs, model, cfg, image), (IStreamParser)new OllamaStreamParser()),
-            BackendType.Anthropic => (AnthropicRequest(msgs, model, cfg, image), new AnthropicStreamParser()),
-            _ => (OpenAIRequest(msgs, model, cfg, image), new OpenAIStreamParser()),
-        };
-
         var isError = false;
         try
         {
+            var msgs = new JsonArray(messages.Select(m => m!.DeepClone()).ToArray());
+            if (o.SystemPrompt.Length > 0)
+                msgs.Insert(0, new JsonObject { ["role"] = "system", ["content"] = o.SystemPrompt });
+
+            using var req = BuildChatRequest(msgs, model, image, o, out var parser);
+            Log($"stream start backend={o.Type} model={model} image={image != null}");
             using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
             idle.CancelAfter(IdleTimeout);
             using var resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, idle.Token);
             if (!resp.IsSuccessStatusCode)
             {
-                var body = (await resp.Content.ReadAsStringAsync(idle.Token)).Trim();
-                var detail = body.Length > 200 ? body[..200] : body;
-                onToken(detail.Length == 0 ? $"HTTP {(int)resp.StatusCode}" : $"HTTP {(int)resp.StatusCode}: {detail}");
+                var message = await StatusMessage(resp, idle.Token);
+                Log($"stream failed {message.Split('\n')[0]}");
+                onToken(message);
                 isError = true;
             }
             else
             {
                 using var reader = new StreamReader(await resp.Content.ReadAsStreamAsync(idle.Token), Encoding.UTF8);
+                var tokens = 0;
                 while (true)
                 {
                     idle.CancelAfter(IdleTimeout);
@@ -95,39 +133,61 @@ class BackendClient
                     if (line == null) break;
                     if (line.Length == 0) continue;
                     var token = parser.Token(line);
-                    if (token != null) onToken(token);
+                    if (token == null) continue;
+                    tokens++;
+                    onToken(token);
+                }
+                Log($"stream done tokens={tokens}");
+                if (tokens == 0)
+                {
+                    onToken("The backend answered but sent no text. Check the model name.");
+                    isError = true;
                 }
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            Log("stream cancelled");
             return;
         }
-        catch (Exception e) when (e is HttpRequestException or OperationCanceledException or IOException)
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException or IOException or InvalidOperationException or UriFormatException)
         {
-            onToken(e is OperationCanceledException ? "Timed out waiting for the backend." : e.Message);
+            var message = DescribeException(e, o.Url);
+            Log($"stream error {message}");
+            onToken(message);
             isError = true;
         }
         onEnd(isError);
     }
 
-    private static HttpRequestMessage Post(string url, JsonObject body)
+    private static HttpRequestMessage BuildChatRequest(JsonArray msgs, string model, string? image, BackendOptions o, out IStreamParser parser)
     {
-        return new HttpRequestMessage(HttpMethod.Post, url)
+        switch (o.Type)
         {
-            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"),
-        };
+            case BackendType.Ollama:
+                parser = new OllamaStreamParser();
+                return OllamaRequest(msgs, model, o, image);
+            case BackendType.Anthropic:
+                parser = new AnthropicStreamParser();
+                return AnthropicRequest(msgs, model, o, image);
+            default:
+                parser = new OpenAIStreamParser();
+                return OpenAIRequest(msgs, model, o, image);
+        }
     }
 
-    private static HttpRequestMessage OllamaRequest(JsonArray msgs, string model, Settings cfg, string? image)
+    private static HttpRequestMessage Post(string url, JsonObject body) =>
+        new(HttpMethod.Post, url) { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
+
+    private static HttpRequestMessage OllamaRequest(JsonArray msgs, string model, BackendOptions o, string? image)
     {
         if (image != null && msgs.Count > 0)
             msgs[^1]!["images"] = new JsonArray(image);
-        return Post($"{cfg.BackendUrl}/api/chat",
+        return Post($"{BaseUrl(o)}/api/chat",
             new JsonObject { ["model"] = model, ["messages"] = msgs, ["stream"] = true });
     }
 
-    private static HttpRequestMessage OpenAIRequest(JsonArray msgs, string model, Settings cfg, string? image)
+    private static HttpRequestMessage OpenAIRequest(JsonArray msgs, string model, BackendOptions o, string? image)
     {
         if (image != null && msgs.Count > 0 && msgs[^1]!["content"] is JsonValue text)
         {
@@ -139,16 +199,14 @@ class BackendClient
                     ["image_url"] = new JsonObject { ["url"] = $"data:image/png;base64,{image}" },
                 });
         }
-        var req = Post($"{cfg.BackendUrl}/chat/completions",
+        var req = Post($"{BaseUrl(o)}/chat/completions",
             new JsonObject { ["model"] = model, ["stream"] = true, ["messages"] = msgs });
-        if (cfg.ApiKey.Length > 0)
-            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.ApiKey);
+        ApplyAuth(req, o);
         return req;
     }
 
-    private static HttpRequestMessage AnthropicRequest(JsonArray msgs, string model, Settings cfg, string? image)
+    private static HttpRequestMessage AnthropicRequest(JsonArray msgs, string model, BackendOptions o, string? image)
     {
-        var baseUrl = cfg.BackendUrl.Length == 0 ? AnthropicDefaultUrl : cfg.BackendUrl;
         var system = msgs.FirstOrDefault(m => m!["role"]?.GetValue<string>() == "system")?["content"]?.GetValue<string>();
         var userMsgs = new JsonArray(msgs.Where(m => m!["role"]?.GetValue<string>() != "system")
             .Select(m => m!.DeepClone()).ToArray());
@@ -173,9 +231,8 @@ class BackendClient
         };
         if (!string.IsNullOrEmpty(system)) body["system"] = system;
 
-        var req = Post($"{baseUrl}/messages", body);
-        req.Headers.Add("x-api-key", cfg.ApiKey);
-        req.Headers.Add("anthropic-version", "2023-06-01");
+        var req = Post($"{BaseUrl(o)}/messages", body);
+        ApplyAuth(req, o);
         return req;
     }
 }
