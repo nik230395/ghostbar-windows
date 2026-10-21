@@ -16,6 +16,7 @@ class SettingsForm : StealthForm
         new("Ollama", BackendType.Ollama, "http://localhost:11434", "Local Ollama instance"),
         new("OpenAI", BackendType.OpenAI, "https://api.openai.com/v1", "Requires API key"),
         new("Anthropic", BackendType.Anthropic, "https://api.anthropic.com/v1", "Requires API key"),
+        new("Google Gemini", BackendType.OpenAI, "https://generativelanguage.googleapis.com/v1beta/openai", "Requires API key (Google AI Studio)"),
         new("OpenRouter", BackendType.OpenRouter, "https://openrouter.ai/api/v1", "Requires API key"),
         new("NVIDIA NIM", BackendType.OpenAI, "https://integrate.api.nvidia.com/v1", "Requires API key"),
         new("llama.cpp", BackendType.OpenAI, "http://localhost:8080/v1", "Local llama.cpp server"),

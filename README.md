@@ -46,7 +46,18 @@ Einstellungen liegen in `%APPDATA%\Ghostbar\settings.json`, der API-Key ist per 
 
 ## Backends
 
-Ollama, OpenAI, Anthropic, OpenRouter sowie alle OpenAI-kompatiblen Server (NVIDIA NIM, llama.cpp, LM Studio, vLLM).
+Ollama, OpenAI, Anthropic, Google Gemini, OpenRouter sowie alle OpenAI-kompatiblen Server (NVIDIA NIM, llama.cpp, LM Studio, vLLM).
+
+## Beispiel: Gemini (kostenloser Key)
+
+1. [Ghostbar-Release](../../releases) bzw. `publish/`-Ordner auf den Windows-Rechner kopieren und `Ghostbar.exe` starten (es erscheint nichts, das ist gewollt).
+2. Auf <https://aistudio.google.com/api-keys> anmelden und **Create API key** wählen (Name z. B. `ghostbar`, Standardprojekt). Key kopieren.
+3. **Ctrl+Shift+Space** drücken, dann das Zahnrad im Chat öffnen.
+4. Backend **Google Gemini** auswählen, Key einfügen, **Test**, dann **Save**.
+5. Im Chat-Header ein Modell wählen, z. B. eines mit `flash` im Namen.
+6. Fertig: Das App-Icon verstecken ist nicht nötig, es gibt keins.
+
+Gemini wird über den OpenAI-kompatiblen Endpunkt `https://generativelanguage.googleapis.com/v1beta/openai` angesprochen. Für andere Anbieter gilt derselbe Ablauf: Backend wählen, Key einfügen, Save.
 
 ## Spracheingabe (optional)
 
