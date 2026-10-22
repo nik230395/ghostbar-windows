@@ -26,6 +26,15 @@ public class ModelsTests
     }
 
     [Fact]
+    public async Task Gemini_ModelsPrefix_IsRemoved()
+    {
+        using var server = new FakeServer(FakeServer.Lines("""{"data":[{"id":"models/gemini-flash"},{"id":"models/gemini-pro"}]}"""));
+        var names = await BackendClient.FetchModelsAsync(new(BackendType.OpenAI, server.Url, "k"));
+
+        Assert.Equal(["gemini-flash", "gemini-pro"], names);
+    }
+
+    [Fact]
     public async Task Anthropic_UsesApiKeyHeader()
     {
         using var server = new FakeServer(FakeServer.Lines("""{"data":[{"id":"claude-x"}]}"""));

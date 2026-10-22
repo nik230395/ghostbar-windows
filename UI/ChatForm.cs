@@ -21,7 +21,7 @@ class ChatForm : StealthForm
         })};
         document.addEventListener('mousedown', e => {
           if (e.button !== 0 || !e.target.closest('#header')) return;
-          if (e.target.closest('button, select, input, a')) return;
+          if (e.target.closest('button, select, input, a, #model-dropdown')) return;
           window.chrome.webview.postMessage({ name: 'startDrag' });
         }, true);
         """;

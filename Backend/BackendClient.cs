@@ -82,8 +82,11 @@ public static class BackendClient
         var json = JsonNode.Parse(await resp.Content.ReadAsStringAsync(cts.Token));
         if (o.Type == BackendType.Ollama)
             return json?["models"]?.AsArray().Select(m => m?["name"]?.GetValue<string>()).OfType<string>().ToList() ?? [];
-        return json?["data"]?.AsArray().Select(m => m?["id"]?.GetValue<string>()).OfType<string>().Order().ToList() ?? [];
+        return json?["data"]?.AsArray().Select(m => m?["id"]?.GetValue<string>()).OfType<string>().Select(StripModelsPrefix).Order().ToList() ?? [];
     }
+
+    private static string StripModelsPrefix(string id) =>
+        id.StartsWith("models/", StringComparison.Ordinal) ? id["models/".Length..] : id;
 
     public static async Task<string> TestAsync(BackendOptions o)
     {
