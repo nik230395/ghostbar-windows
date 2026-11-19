@@ -1,5 +1,14 @@
 # Ghostbar für Windows
 
+[English](README.md) | **Deutsch**
+
+[![Release](https://img.shields.io/github/v/release/nik230395/ghostbar-windows)](../../releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/nik230395/ghostbar-windows/ci.yml?label=CI)](../../actions)
+[![License: MIT](https://img.shields.io/github/license/nik230395/ghostbar-windows)](LICENSE)
+![Platform: Windows 10 (2004+) / 11](https://img.shields.io/badge/platform-Windows%2010%20%282004%2B%29%20%7C%2011-0078D6)
+![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white)
+![UI: WinForms + WebView2](https://img.shields.io/badge/UI-WinForms%20%2B%20WebView2-informational)
+
 Windows-Port von [rbc33/Ghostbar](https://github.com/rbc33/Ghostbar): ein KI-Chat, der für Screen-Sharing und Aufnahmen unsichtbar ist.
 C# / .NET 10 (WinForms) + WebView2. Die Chat-Oberfläche ist das HTML des Originals.
 
