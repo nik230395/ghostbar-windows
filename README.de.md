@@ -18,12 +18,14 @@ C# / .NET 10 (WinForms) + WebView2. Die Chat-Oberfläche ist das HTML des Origin
 2. [Installation](#installation)
 3. [Erster Start](#erster-start)
 4. [API anbinden](#api-anbinden)
-5. [Bedienung](#bedienung)
-6. [Autostart](#autostart)
-7. [Spracheingabe (optional)](#spracheingabe-optional)
-8. [Update, Beenden, Deinstallieren](#update-beenden-deinstallieren)
-9. [Probleme lösen](#probleme-lösen)
-10. [Test-Checkliste](#test-checkliste)
+5. [Automatische Modellwahl](#automatische-modellwahl)
+6. [Projektordner: KI liest und ändert Dateien](#projektordner-ki-liest-und-ändert-dateien)
+7. [Bedienung](#bedienung)
+8. [Autostart](#autostart)
+9. [Spracheingabe (optional)](#spracheingabe-optional)
+10. [Update, Beenden, Deinstallieren](#update-beenden-deinstallieren)
+11. [Probleme lösen](#probleme-lösen)
+12. [Test-Checkliste](#test-checkliste)
 
 ## So funktioniert es
 
@@ -128,6 +130,55 @@ Gemini läuft über den OpenAI-kompatiblen Endpunkt `https://generativelanguage.
 
 Der Key liegt mit Windows-DPAPI verschlüsselt in `%APPDATA%\Ghostbar\settings.json` und ist nur für deinen Windows-Benutzer lesbar.
 
+## Automatische Modellwahl
+
+Im Modell-Menü oben links steht ganz oben **Auto** (Standard). Schlägt ein Modell fehl, bevor Text kommt, nimmt Ghostbar das nächste Modell und zeigt im Chat eine gelbe Zeile, z. B. `↪ gemini-2.5-flash: rate limit, switching to gemini-2.5-flash-lite`. Oben in der Antwort steht, welches Modell geantwortet hat.
+
+**Reihenfolge:** Zuerst Flash-Modelle (neueste zuerst), dann Flash-Lite, dann Pro, dann der Rest. Modelle für Embedding, Bild, Video, Sprache und Live werden übersprungen. In den Settings unter **Model order for Auto** kannst du die Reihenfolge mit ▲/▼ ändern und Modelle abwählen. **Automatic order** setzt sie zurück. Wählst du im Chat ein bestimmtes Modell, wird es zuerst probiert und die anderen dienen als Ersatz.
+
+| Fehler | Verhalten |
+|---|---|
+| 429 Kontingent/Rate-Limit | Nächstes Modell. Das alte pausiert 1 Minute, bei aufgebrauchtem Tageskontingent bis Mitternacht Pacific-Zeit (dann setzt Google es zurück) |
+| 500, 503 | Nächstes Modell, das alte pausiert 30 Sekunden |
+| 400, 403 | Nächstes Modell, das alte pausiert 10 Minuten |
+| 404 | Nächstes Modell, das alte pausiert 12 Stunden |
+| Leere Antwort | Nächstes Modell |
+| 401 | **Kein Wechsel.** Der Key ist ungültig, das gilt für alle Modelle. Key in den Settings prüfen. |
+| Server nicht erreichbar | Kein Wechsel, Fehlermeldung |
+
+- Jedes Modell wird pro Nachricht höchstens einmal probiert. Scheitern alle, steht im Chat `All N models failed.` plus der letzte Fehler.
+- Kommt der Fehler mitten in der Antwort, wechselt Ghostbar nicht (sonst gäbe es halbe Sätze von zwei Modellen). Dann hilft **↺ retry**.
+- Lange Pausen (ab 1 Stunde, z. B. Tageskontingent) bleiben über einen Neustart gespeichert.
+- Google zählt Limits pro Projekt und je nach Modell verschieden. Ein Wechsel hilft bei Minuten- und Modell-Limits, nicht beim projektweiten Ausgabenlimit.
+
+## Projektordner: KI liest und ändert Dateien
+
+Ghostbar kann einem Projektordner Kontext geben und darin Code schreiben, z. B. um ein Basisprojekt zu erweitern.
+
+**Ordner wählen:** Im Chat-Header auf **📁 no project** klicken, dann **Choose folder…**, oder in den Settings unter **Project folder**. Zuletzt benutzte Ordner stehen im selben Menü. **No project** schaltet es ab.
+
+> Das Windows-Fenster „Ordner auswählen“ ist bei Screen-Sharing **sichtbar**, nur Ghostbar selbst ist versteckt. Wähle den Ordner vorher oder füge den Pfad in den Settings ein.
+
+**Was die KI bekommt:** Bei jeder Nachricht die Ordnerstruktur (obere Ebenen) und den Anfang der README. Den Rest holt sie sich selbst mit diesen Werkzeugen:
+
+| Werkzeug | Was es tut | Deine Bestätigung |
+|---|---|---|
+| `list_dir` | Ordner auflisten (ohne `.git`, `node_modules`, `bin`, `obj`, `dist` …) | nein |
+| `read_file` | Textdatei lesen, bis 800 Zeilen pro Aufruf | nein |
+| `search` | Text in Dateien suchen, bis 100 Treffer | nein |
+| `edit_file` | Eine eindeutige Textstelle ersetzen | **ja** |
+| `write_file` | Datei neu anlegen oder komplett ersetzen | **ja** |
+
+Im Chat siehst du jeden Schritt als graue Zeile (`📄 reads src/App.cs`). Jede Änderung erscheint als Karte mit Vorher/Nachher (rot/grün) und den Buttons **Apply** und **Reject**. Erst nach **Apply** wird geschrieben. Lehnst du ab, erfährt die KI das. ⏹ bricht ab und lehnt offene Änderungen ab.
+
+**Grenzen und Schutz:**
+- Nur innerhalb des gewählten Ordners. `../`, absolute Pfade nach außen und Verknüpfungen werden abgelehnt, in `.git` wird nichts geschrieben.
+- Kein Löschen, keine Befehle oder Programme, kein Internet.
+- Höchstens 15 Werkzeug-Schritte pro Nachricht.
+- Die Werkzeuge funktionieren mit Gemini und anderen OpenAI-kompatiblen Anbietern (OpenAI, OpenRouter, LM Studio …). Bei Ollama und Anthropic bekommt die KI nur die Ordnerstruktur und README als Kontext.
+- Dateiinhalte kosten Token. Im kostenlosen Gemini-Tarif ist das Limit damit schneller erreicht, die automatische Modellwahl fängt das teilweise ab.
+- Die KI sieht nur ihre letzte Antwort, nicht die gelesenen Dateien der vorigen Nachricht. Bei einer Folgefrage liest sie die Dateien bei Bedarf neu.
+
 ## Bedienung
 
 | Aktion | Standard (in den Settings änderbar) |
@@ -226,7 +277,13 @@ Den Text kannst du markieren, kopieren und weitergeben.
 
 Ich selbst habe kein Windows-Gerät, deshalb prüfen zwei Testarten die App, ohne dass du etwas installieren musst.
 
-**Unit-Tests (`tests/Ghostbar.Tests`, 44 Tests):** Sie starten einen Fake-Server und prüfen die Kommunikation mit Ollama, OpenAI-kompatiblen Servern und Anthropic: Streaming, Header (`Authorization`, `x-api-key`), Systemprompt, Bild-Anhang, Modellliste, jede Fehlermeldung aus der Tabelle oben, Abbruch und Timeout. Sie laufen auch auf dem Mac/Linux:
+**Unit-Tests (`tests/Ghostbar.Tests`, 105 Tests):** Sie starten einen Fake-Server und prüfen:
+- Kommunikation mit Ollama, OpenAI-kompatiblen Servern und Anthropic: Streaming, Header (`Authorization`, `x-api-key`), Systemprompt, Bild-Anhang, Modellliste, jede Fehlermeldung aus der Tabelle oben, Abbruch und Timeout.
+- Automatische Modellwahl: Wechsel bei 429/500/503/404/400/403 und leerer Antwort, kein Wechsel bei 401 und bei Fehlern mitten im Text, Pausen, Tageskontingent bis Mitternacht Pacific, Reihenfolge.
+- Werkzeuge: Tool-Aufrufe, die in Stücken gestreamt werden (inklusive Geminis `thought_signature`), Rückgabe der Ergebnisse, Abbruch nach 15 Schritten, Bestätigen/Ablehnen von Änderungen.
+- Schutz: `../`, absolute Pfade, Verknüpfungen nach außen, `.git`, Binärdateien, mehrdeutige Textstellen, Windows-Zeilenenden, UTF-8-BOM.
+
+Sie laufen auch auf dem Mac/Linux:
 
 ```bash
 dotnet test tests/Ghostbar.Tests
@@ -240,7 +297,7 @@ dotnet test tests/Ghostbar.Tests
 
 Ergebnis ansehen: GitHub, Reiter **Actions**, letzten Lauf öffnen. Die Tabelle steht oben in der Zusammenfassung, darunter als Download `ghostbar-ci` (fertiges ZIP, `ghostbar.log`, Screenshot).
 
-Was die Tests **nicht** beweisen: Ob das Fenster in Zoom/Teams/OBS wirklich fehlt (der Test prüft nur, dass Windows das Capture-Flag gesetzt hat, und wertet einen Screenshot nur informativ aus), und wie sich echte API-Server, Mikrofon und whisper verhalten.
+Was die Tests **nicht** beweisen: Ob das Fenster in Zoom/Teams/OBS wirklich fehlt (der Test prüft nur, dass Windows das Capture-Flag gesetzt hat, und wertet einen Screenshot nur informativ aus), und wie sich echte API-Server, Mikrofon und whisper verhalten. Insbesondere ist nicht belegt, dass Gemini Tool-Aufrufe im Stream genau so schickt wie der Fake-Server; die Google-Doku beschreibt das nicht.
 
 ## Test-Checkliste
 
@@ -251,6 +308,9 @@ Was die Tests **nicht** beweisen: Ob das Fenster in Zoom/Teams/OBS wirklich fehl
 5. Ollama oder API-Backend streamt Antworten, Modellliste lädt.
 6. Screenshot-Hotkey hängt Bild an, Vision-Modell antwortet.
 7. Settings, Quit beendet den Prozess.
+8. Modell auf **Auto**: Bei 429 erscheint eine gelbe Wechsel-Zeile und ein anderes Modell antwortet.
+9. Projektordner wählen, fragen „Was macht dieses Projekt?“: graue `reads`-Zeilen erscheinen, Antwort passt zum Projekt.
+10. „Füge eine Datei NOTES.md mit … hinzu“: Änderungskarte erscheint, **Reject** schreibt nichts, **Apply** legt die Datei an.
 
 ## Unterschiede zum macOS-Original
 

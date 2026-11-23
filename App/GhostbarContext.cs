@@ -19,6 +19,7 @@ class GhostbarContext : ApplicationContext
 
     public bool HotKeyRegistered => hotKey.Registered;
     public IntPtr ChatHandle => Chat.Handle;
+    public IReadOnlyList<string> AvailableModels => chat?.AvailableModels ?? [];
 
     private static void ReportHotKeyFailure() =>
         MessageBox.Show($"The shortcut {Settings.Current.Toggle.DisplayString} is used by another program. Ghostbar cannot be opened until you free it or choose another shortcut.", "Ghostbar", MessageBoxButtons.OK, MessageBoxIcon.Warning);

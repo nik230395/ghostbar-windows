@@ -18,12 +18,14 @@ C# / .NET 10 (WinForms) + WebView2. The chat interface is the original's HTML.
 2. [Installation](#installation)
 3. [First start](#first-start)
 4. [Connecting an API](#connecting-an-api)
-5. [Usage](#usage)
-6. [Autostart](#autostart)
-7. [Voice input (optional)](#voice-input-optional)
-8. [Update, quit, uninstall](#update-quit-uninstall)
-9. [Troubleshooting](#troubleshooting)
-10. [Test checklist](#test-checklist)
+5. [Automatic model selection](#automatic-model-selection)
+6. [Project folder: the AI reads and edits files](#project-folder-the-ai-reads-and-edits-files)
+7. [Usage](#usage)
+8. [Autostart](#autostart)
+9. [Voice input (optional)](#voice-input-optional)
+10. [Update, quit, uninstall](#update-quit-uninstall)
+11. [Troubleshooting](#troubleshooting)
+12. [Test checklist](#test-checklist)
 
 ## How it works
 
@@ -128,6 +130,55 @@ Gemini runs through the OpenAI-compatible endpoint `https://generativelanguage.g
 
 The key is stored encrypted with Windows DPAPI in `%APPDATA%\Ghostbar\settings.json` and can only be read by your Windows user.
 
+## Automatic model selection
+
+The model menu at the top left starts with **Auto** (the default). If a model fails before any text arrives, Ghostbar switches to the next model and shows a yellow line in the chat, e.g. `↪ gemini-2.5-flash: rate limit, switching to gemini-2.5-flash-lite`. The answer's label shows which model actually replied.
+
+**Order:** Flash models first (newest first), then Flash-Lite, then Pro, then the rest. Embedding, image, video, speech and live models are skipped. In Settings under **Model order for Auto** you can change the order with ▲/▼ and uncheck models. **Automatic order** resets it. If you pick a specific model in the chat, it is tried first and the others act as backups.
+
+| Error | Behaviour |
+|---|---|
+| 429 quota/rate limit | Next model. The failed one pauses for 1 minute, or until midnight Pacific time if the daily quota is used up (Google resets it then) |
+| 500, 503 | Next model, the failed one pauses for 30 seconds |
+| 400, 403 | Next model, the failed one pauses for 10 minutes |
+| 404 | Next model, the failed one pauses for 12 hours |
+| Empty answer | Next model |
+| 401 | **No switch.** The key is invalid, which applies to every model. Check the key in Settings. |
+| Server unreachable | No switch, error message |
+
+- Each model is tried at most once per message. If all fail, the chat shows `All N models failed.` plus the last error.
+- If the error comes in the middle of an answer, Ghostbar does not switch (that would mix half sentences from two models). Use **↺ retry**.
+- Long pauses (1 hour or more, e.g. the daily quota) survive a restart.
+- Google counts limits per project and differently per model. Switching helps with per-minute and per-model limits, not with the project-wide spend limit.
+
+## Project folder: the AI reads and edits files
+
+Ghostbar can give the AI a project folder as context and let it write code there, e.g. to extend a starter project.
+
+**Choosing the folder:** In the chat header click **📁 no project**, then **Choose folder…**, or use **Project folder** in Settings. Recently used folders appear in the same menu. **No project** turns it off.
+
+> The Windows "Select folder" dialog **is visible** during screen sharing; only Ghostbar itself is hidden. Pick the folder beforehand or paste the path in Settings.
+
+**What the AI gets:** With every message the folder structure (top levels) and the start of the README. It fetches the rest itself with these tools:
+
+| Tool | What it does | Your approval |
+|---|---|---|
+| `list_dir` | List folders (skips `.git`, `node_modules`, `bin`, `obj`, `dist` …) | no |
+| `read_file` | Read a text file, up to 800 lines per call | no |
+| `search` | Search text in files, up to 100 matches | no |
+| `edit_file` | Replace one unique piece of text | **yes** |
+| `write_file` | Create a file or replace it completely | **yes** |
+
+Each step shows up in the chat as a grey line (`📄 reads src/App.cs`). Every change appears as a card with before/after (red/green) and the buttons **Apply** and **Reject**. Nothing is written until you click **Apply**. If you reject, the AI is told. ⏹ stops and rejects open changes.
+
+**Limits and protection:**
+- Only inside the chosen folder. `../`, absolute paths to the outside and links are refused; nothing is written into `.git`.
+- No deleting, no commands or programs, no internet.
+- At most 15 tool steps per message.
+- The tools work with Gemini and other OpenAI-compatible providers (OpenAI, OpenRouter, LM Studio …). With Ollama and Anthropic the AI only gets the folder structure and README as context.
+- File contents cost tokens. On the free Gemini tier you hit the limit sooner; automatic model selection partly absorbs that.
+- The AI only sees its last answer, not the files it read for the previous message. For a follow-up question it reads them again if needed.
+
 ## Usage
 
 | Action | Default (changeable in Settings) |
@@ -226,7 +277,13 @@ You can select, copy and share the text.
 
 I do not have a Windows machine myself, so two kinds of tests check the app without you having to install anything.
 
-**Unit tests (`tests/Ghostbar.Tests`, 44 tests):** They start a fake server and check communication with Ollama, OpenAI-compatible servers and Anthropic: streaming, headers (`Authorization`, `x-api-key`), system prompt, image attachment, model list, every error message from the table above, cancellation and timeout. They also run on Mac/Linux:
+**Unit tests (`tests/Ghostbar.Tests`, 105 tests):** They start a fake server and check:
+- Communication with Ollama, OpenAI-compatible servers and Anthropic: streaming, headers (`Authorization`, `x-api-key`), system prompt, image attachment, model list, every error message from the table above, cancellation and timeout.
+- Automatic model selection: switching on 429/500/503/404/400/403 and empty answers, no switch on 401 or on errors mid-answer, pauses, daily quota until midnight Pacific, ordering.
+- Tools: tool calls streamed in pieces (including Gemini's `thought_signature`), sending results back, stopping after 15 steps, approving/rejecting changes.
+- Protection: `../`, absolute paths, links to the outside, `.git`, binary files, ambiguous text, Windows line endings, UTF-8 BOM.
+
+They also run on Mac/Linux:
 
 ```bash
 dotnet test tests/Ghostbar.Tests
@@ -240,7 +297,7 @@ dotnet test tests/Ghostbar.Tests
 
 To view the result: GitHub, **Actions** tab, open the latest run. The table is at the top of the summary, and below it is the download `ghostbar-ci` (finished ZIP, `ghostbar.log`, screenshot).
 
-What the tests do **not** prove: whether the window is really missing in Zoom/Teams/OBS (the test only checks that Windows has set the capture flag, and evaluates a screenshot for information only), and how real API servers, the microphone and whisper behave.
+What the tests do **not** prove: whether the window is really missing in Zoom/Teams/OBS (the test only checks that Windows has set the capture flag, and evaluates a screenshot for information only), and how real API servers, the microphone and whisper behave. In particular, it is not proven that Gemini streams tool calls exactly like the fake server does; Google's documentation does not describe it.
 
 ## Test checklist
 
@@ -251,6 +308,9 @@ What the tests do **not** prove: whether the window is really missing in Zoom/Te
 5. Ollama or API backend streams answers, model list loads.
 6. Screenshot hotkey attaches an image, a vision model answers.
 7. Settings, Quit ends the process.
+8. Model on **Auto**: on a 429 a yellow switch line appears and another model answers.
+9. Choose a project folder, ask "What does this project do?": grey `reads` lines appear and the answer fits the project.
+10. "Add a file NOTES.md with …": a change card appears, **Reject** writes nothing, **Apply** creates the file.
 
 ## Differences from the macOS original
 

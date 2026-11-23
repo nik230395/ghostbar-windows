@@ -18,6 +18,11 @@ public class Settings
     public KeyChord Toggle { get; set; } = KeyChord.DefaultToggle;
     public KeyChord Mic { get; set; } = KeyChord.DefaultMic;
     public KeyChord Capture { get; set; } = KeyChord.DefaultCapture;
+    public string ProjectFolder { get; set; } = "";
+    public List<string> RecentProjects { get; set; } = [];
+    public List<string> ModelOrder { get; set; } = [];
+    public List<string> DisabledModels { get; set; } = [];
+    public Dictionary<string, DateTimeOffset> ModelCooldowns { get; set; } = [];
 
     private static readonly string Dir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Ghostbar");
@@ -46,6 +51,15 @@ public class Settings
                 : Convert.ToBase64String(ProtectedData.Protect(
                     Encoding.UTF8.GetBytes(value), null, DataProtectionScope.CurrentUser));
         }
+    }
+
+    public void UseProject(string folder)
+    {
+        ProjectFolder = folder;
+        if (folder.Length == 0) return;
+        RecentProjects.RemoveAll(p => string.Equals(p, folder, StringComparison.OrdinalIgnoreCase));
+        RecentProjects.Insert(0, folder);
+        if (RecentProjects.Count > 8) RecentProjects.RemoveRange(8, RecentProjects.Count - 8);
     }
 
     public BackendOptions ToBackendOptions() => new(BackendType, BackendUrl, ApiKey, SystemPrompt);

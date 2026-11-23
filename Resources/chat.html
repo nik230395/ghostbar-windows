@@ -128,6 +128,43 @@ html,body{height:100%;background:transparent;color:var(--text);
   color:var(--muted);line-height:0;padding:0 4px;cursor:pointer;
   transition:color .15s,transform .3s;-webkit-app-region:no-drag}
 #settings-btn:hover{color:var(--text);transform:rotate(45deg)}
+#project-wrap{position:relative;display:flex;align-items:center}
+#project-btn{background:transparent;border:1px solid var(--border);color:var(--muted);
+  font-family:var(--font);font-size:10.5px;cursor:pointer;outline:none;
+  padding:1px 6px;border-radius:3px;max-width:200px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;transition:color .15s,border-color .15s}
+#project-btn:hover{color:var(--text);border-color:var(--text)}
+#project-btn.active{color:var(--accent);border-color:var(--accent)}
+#project-dropdown{display:none;position:fixed;top:44px;
+  background:var(--surface);border:1px solid var(--border);border-radius:6px;
+  min-width:240px;z-index:999;overflow-y:auto;max-height:calc(100vh - 60px);
+  box-shadow:0 8px 24px rgba(0,0,0,.15)}
+#project-dropdown.open{display:block}
+.project-opt{padding:7px 14px;font-size:11.5px;cursor:pointer;color:var(--text);white-space:nowrap}
+.project-opt:hover{background:var(--border)}
+.project-opt.active{color:var(--accent)}
+.project-opt .path{color:var(--muted);font-size:10px;margin-left:6px}
+.project-sep{border-top:1px solid var(--border);margin:3px 0}
+.tools:empty{display:none}
+.tools{margin-bottom:8px;display:flex;flex-direction:column;gap:3px}
+.tool-line{font-size:10.5px;color:var(--muted)}
+.notice{font-size:10.5px;color:#fbbf24}
+.sys-notice{font-size:10.5px;color:#fbbf24;margin:0 0 12px}
+.change{border:1px solid var(--border);border-radius:6px;margin:4px 0;overflow:hidden}
+.change-head{font-size:11px;padding:6px 10px;background:rgba(0,0,0,.25);color:var(--text)}
+.change-head .muted{color:var(--muted)}
+.diff{font-size:11px;max-height:260px;overflow:auto;padding:4px 0;background:rgba(0,0,0,.2)}
+.diff div{white-space:pre;padding:0 10px}
+.diff .add{color:#86efac;background:rgba(74,222,128,.08)}
+.diff .del{color:#fca5a5;background:rgba(248,113,113,.08)}
+.diff .gap{color:var(--muted);font-style:italic}
+.change-actions{display:flex;gap:6px;padding:6px 10px;align-items:center;font-size:11px}
+.change-actions button{background:none;border:1px solid var(--border);color:var(--text);
+  font-family:var(--font);font-size:11px;padding:2px 10px;border-radius:3px;cursor:pointer}
+.change-actions .apply{border-color:var(--accent);color:var(--accent)}
+.change-actions .apply:hover{background:var(--accent);color:#1a1a1a}
+.change-actions .reject:hover{border-color:var(--error);color:var(--error)}
+.change-status{color:var(--muted)}
 </style>
 </head>
 <body>
@@ -143,6 +180,10 @@ html,body{height:100%;background:transparent;color:var(--text);
         <div id="model-dropdown"></div>
       </div>
       <span id="backend-badge">ollama</span>
+      <div id="project-wrap">
+        <button id="project-btn" title="Project folder the AI can read and edit">📁 no project</button>
+        <div id="project-dropdown"></div>
+      </div>
     </div>
     <div style="display:flex;align-items:center;gap:4px;-webkit-app-region:no-drag">
       <button id="autoscroll-btn" title="Auto-scroll">↓</button>
@@ -270,8 +311,51 @@ const modelName     = document.getElementById('model-name');
 const modelDropdown = document.getElementById('model-dropdown');
 const backendBadge  = document.getElementById('backend-badge');
 
-modelBtn.addEventListener('click', e => { e.stopPropagation(); modelDropdown.classList.toggle('open'); });
-document.addEventListener('click', () => modelDropdown.classList.remove('open'));
+modelBtn.addEventListener('click', e => { e.stopPropagation(); projectDropdown.classList.remove('open'); modelDropdown.classList.toggle('open'); });
+document.addEventListener('click', () => { modelDropdown.classList.remove('open'); projectDropdown.classList.remove('open'); });
+
+// ── Project folder ────────────────────────────────────────────────────────────
+const projectBtn      = document.getElementById('project-btn');
+const projectDropdown = document.getElementById('project-dropdown');
+
+projectBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  modelDropdown.classList.remove('open');
+  projectDropdown.style.left = projectBtn.getBoundingClientRect().left + 'px';
+  projectDropdown.classList.toggle('open');
+});
+
+function projectOption(label, detail, active, onClick) {
+  const div = document.createElement('div');
+  div.className = 'project-opt' + (active ? ' active' : '');
+  div.textContent = label;
+  if (detail) {
+    const span = document.createElement('span');
+    span.className = 'path';
+    span.textContent = detail;
+    div.appendChild(span);
+  }
+  div.addEventListener('click', e => { e.stopPropagation(); projectDropdown.classList.remove('open'); onClick(); });
+  return div;
+}
+
+function setProject(name, path, recent) {
+  projectBtn.textContent = '📁 ' + (name || 'no project');
+  projectBtn.title = path || 'Project folder the AI can read and edit';
+  projectBtn.classList.toggle('active', !!name);
+  projectDropdown.innerHTML = '';
+  recent.forEach(p => projectDropdown.appendChild(projectOption(p.name, p.path, p.path === path,
+    () => window.webkit.messageHandlers.setProject.postMessage({path: p.path}))));
+  if (recent.length) {
+    const sep = document.createElement('div');
+    sep.className = 'project-sep';
+    projectDropdown.appendChild(sep);
+  }
+  projectDropdown.appendChild(projectOption('Choose folder…', '', false,
+    () => window.webkit.messageHandlers.chooseProject.postMessage({})));
+  projectDropdown.appendChild(projectOption('No project', '', !path,
+    () => window.webkit.messageHandlers.setProject.postMessage({path: ''})));
+}
 
 document.getElementById('close-btn').addEventListener('click', () => {
   window.webkit.messageHandlers.closeWindow.postMessage({});
@@ -323,6 +407,7 @@ function receiveModels(models, backend) {
     div.textContent = m;
     div.addEventListener('click', e => {
       e.stopPropagation(); model = m;
+      window.webkit.messageHandlers.selectModel.postMessage({model: m});
       modelName.textContent = m.split(':')[0];
       modelDropdown.querySelectorAll('.model-opt').forEach(el => el.classList.toggle('active', el.textContent === m));
       modelDropdown.classList.remove('open');
@@ -481,7 +566,8 @@ function addMsg(role) {
   const c = document.getElementById('msgs'), d = document.createElement('div');
   d.className = 'msg ' + role;
   const L = {user:'you', ai:model.split(':')[0], err:'error'};
-  d.innerHTML = '<div class="lbl">' + (L[role]||role) + '</div><div class="body"></div>';
+  d.innerHTML = '<div class="lbl"></div>' + (role === 'ai' ? '<div class="tools"></div>' : '') + '<div class="body"></div>';
+  d.querySelector('.lbl').textContent = L[role] || role;
   if (role === 'ai') {
     const copyBtn = document.createElement('button');
     copyBtn.className = 'copy-btn';
@@ -510,6 +596,85 @@ function appendToken(t) {
     const msgs = document.getElementById('msgs');
     msgs.scrollTop = msgs.scrollHeight;
   }
+}
+
+function currentTools() {
+  const msg = currentBody && currentBody.closest('.msg');
+  return msg ? msg.querySelector('.tools') : document.getElementById('msgs');
+}
+
+function addLine(className, text) {
+  const div = document.createElement('div');
+  div.className = className;
+  div.textContent = text;
+  currentTools().appendChild(div);
+  if (autoScroll) { const msgs = document.getElementById('msgs'); msgs.scrollTop = msgs.scrollHeight; }
+  return div;
+}
+
+function addToolLine(text) { addLine('tool-line', text); }
+function addNotice(text) { addLine('notice', '↪ ' + text); }
+
+function addSystemNotice(text) {
+  const div = document.createElement('div');
+  div.className = 'sys-notice';
+  div.textContent = text;
+  document.getElementById('msgs').appendChild(div);
+}
+
+function setActiveModel(name) {
+  const msg = currentBody && currentBody.closest('.msg');
+  const lbl = msg && msg.querySelector('.lbl');
+  if (lbl) lbl.textContent = name.split(':')[0];
+}
+
+function showChange(id, path, isNew, lines) {
+  const card = document.createElement('div');
+  card.className = 'change';
+  card.id = 'chg-' + id;
+  const head = document.createElement('div');
+  head.className = 'change-head';
+  head.textContent = '✏️ ' + path + ' ';
+  const kind = document.createElement('span');
+  kind.className = 'muted';
+  kind.textContent = isNew ? '(new file)' : '(edit)';
+  head.appendChild(kind);
+  const diff = document.createElement('div');
+  diff.className = 'diff';
+  lines.forEach(([k, text]) => {
+    const row = document.createElement('div');
+    row.className = k === '+' ? 'add' : k === '-' ? 'del' : k === '…' ? 'gap' : '';
+    row.textContent = (k === '…' ? '… ' : k + ' ') + text;
+    diff.appendChild(row);
+  });
+  const actions = document.createElement('div');
+  actions.className = 'change-actions';
+  const apply = document.createElement('button');
+  apply.className = 'apply';
+  apply.textContent = 'Apply';
+  const reject = document.createElement('button');
+  reject.className = 'reject';
+  reject.textContent = 'Reject';
+  const status = document.createElement('span');
+  status.className = 'change-status';
+  const answer = approved => {
+    apply.disabled = reject.disabled = true;
+    status.textContent = approved ? 'applying…' : 'rejecting…';
+    window.webkit.messageHandlers.confirmChange.postMessage({id: id, approved: approved});
+  };
+  apply.addEventListener('click', () => answer(true));
+  reject.addEventListener('click', () => answer(false));
+  actions.append(apply, reject, status);
+  card.append(head, diff, actions);
+  currentTools().appendChild(card);
+  if (autoScroll) { const msgs = document.getElementById('msgs'); msgs.scrollTop = msgs.scrollHeight; }
+}
+
+function changeResolved(id, approved) {
+  const card = document.getElementById('chg-' + id);
+  if (!card) return;
+  card.querySelectorAll('.change-actions button').forEach(b => b.remove());
+  card.querySelector('.change-status').textContent = approved ? '✓ applied' : '✗ rejected';
 }
 
 function showStreamStats() {

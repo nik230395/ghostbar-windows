@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <Compile Include="..\..\Backend\*.cs" />
+    <Compile Include="..\..\Tools\*.cs" />
   </ItemGroup>
 
   <ItemGroup>

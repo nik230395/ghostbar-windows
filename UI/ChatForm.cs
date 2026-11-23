@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -6,6 +7,7 @@ using Ghostbar.Backend;
 using Ghostbar.Config;
 using Ghostbar.Native;
 using Ghostbar.Services;
+using Ghostbar.Tools;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -21,7 +23,7 @@ class ChatForm : StealthForm
         })};
         document.addEventListener('mousedown', e => {
           if (e.button !== 0 || !e.target.closest('#header')) return;
-          if (e.target.closest('button, select, input, a, #model-dropdown')) return;
+          if (e.target.closest('button, select, input, a, #model-dropdown, #project-dropdown')) return;
           window.chrome.webview.postMessage({ name: 'startDrag' });
         }, true);
         """;
@@ -32,6 +34,10 @@ class ChatForm : StealthForm
     private CancellationTokenSource? streamCts;
     private string? storedScreenshot;
     private bool isRecording;
+    private readonly ModelRouter router = new();
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> pendingChanges = new();
+
+    public List<string> AvailableModels { get; private set; } = [];
 
     public ChatForm(GhostbarContext context)
     {
@@ -42,6 +48,7 @@ class ChatForm : StealthForm
         MinimumSize = new Size(360, 300);
         Padding = new Padding(1);
         LoadBounds();
+        router.Restore(Settings.Current.ModelCooldowns);
         Controls.Add(web);
         Load += async (_, _) => await InitWebViewAsync();
         ResizeEnd += (_, _) => SaveBounds();
@@ -140,7 +147,45 @@ class ChatForm : StealthForm
         Script($"setSavedModel({Js(Settings.Current.SelectedModel)})");
         PushShortcuts();
         PushScreenshotPrompt();
+        PushProject();
         FetchModels();
+    }
+
+    private void PushProject()
+    {
+        var cfg = Settings.Current;
+        var recent = new JsonArray(cfg.RecentProjects.Select(p => (JsonNode)new JsonObject
+        {
+            ["path"] = p, ["name"] = ProjectName(p),
+        }).ToArray());
+        Script($"setProject({Js(ProjectName(cfg.ProjectFolder))},{Js(cfg.ProjectFolder)},{recent.ToJsonString()})");
+    }
+
+    private static string ProjectName(string folder) =>
+        folder.Length == 0 ? "" : Path.GetFileName(Path.TrimEndingDirectorySeparator(folder));
+
+    private void SetProject(string folder)
+    {
+        if (folder.Length > 0 && !Directory.Exists(folder))
+        {
+            Script($"addSystemNotice({Js($"Folder not found: {folder}")})");
+            return;
+        }
+        Settings.Current.UseProject(folder);
+        Settings.Current.Save();
+        Logger.Write($"project set {(folder.Length == 0 ? "none" : ProjectName(folder))}");
+        PushProject();
+    }
+
+    private void ChooseProject()
+    {
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = "Choose the project folder",
+            UseDescriptionForTitle = true,
+            SelectedPath = Directory.Exists(Settings.Current.ProjectFolder) ? Settings.Current.ProjectFolder : "",
+        };
+        if (dialog.ShowDialog(this) == DialogResult.OK) SetProject(dialog.SelectedPath);
     }
 
     private void PushShortcuts()
@@ -161,8 +206,10 @@ class ChatForm : StealthForm
         try
         {
             var names = await BackendClient.FetchModelsAsync(cfg.ToBackendOptions());
+            AvailableModels = names;
             var kind = cfg.BackendType == BackendType.Ollama ? "ollama" : "openai";
-            Script($"receiveModels({JsonSerializer.Serialize(names)},'{kind}')");
+            var entries = names.Count > 0 ? names.Prepend(ModelRouter.Auto) : names;
+            Script($"receiveModels({JsonSerializer.Serialize(entries)},'{kind}')");
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {
@@ -185,6 +232,17 @@ class ChatForm : StealthForm
                 Script($"setSavedModel({Js(Settings.Current.SelectedModel)})");
                 PushShortcuts();
                 PushScreenshotPrompt();
+                PushProject();
+                break;
+            case "selectModel":
+                Settings.Current.SelectedModel = SseLineText(body?["model"]) ?? "";
+                Settings.Current.Save();
+                break;
+            case "chooseProject": BeginInvoke(ChooseProject); break;
+            case "setProject": SetProject(SseLineText(body?["path"]) ?? ""); break;
+            case "confirmChange":
+                if (SseLineText(body?["id"]) is { } id && pendingChanges.TryGetValue(id, out var pending))
+                    pending.TrySetResult(body?["approved"] is JsonValue a && a.TryGetValue<bool>(out var ok) && ok);
                 break;
             case "checkWhisper":
                 Script($"onWhisperStatus({(Transcriber.FindBinary() != null).ToString().ToLower()},{(Transcriber.FindModel() != null).ToString().ToLower()})");
@@ -213,13 +271,81 @@ class ChatForm : StealthForm
         var useScreenshot = body["screenshot"] is JsonValue v && v.TryGetValue<bool>(out var b) && b;
         var image = useScreenshot ? storedScreenshot : null;
 
+        var cfg = Settings.Current;
+        var options = cfg.ToBackendOptions();
+        var tools = CreateProjectTools(cfg);
+        IToolExecutor? executor = null;
+        if (tools != null)
+        {
+            var toolsEnabled = BackendClient.SupportsTools(cfg.BackendType);
+            var projectPrompt = tools.SystemPrompt(toolsEnabled);
+            options = options with { SystemPrompt = options.SystemPrompt.Length > 0 ? $"{options.SystemPrompt}\n\n{projectPrompt}" : projectPrompt };
+            if (toolsEnabled) executor = tools;
+        }
+        var order = ModelRouter.Order(AvailableModels, cfg.ModelOrder, cfg.DisabledModels);
+
         streamCts?.Cancel();
         var cts = streamCts = new CancellationTokenSource();
-        _ = BackendClient.StreamAsync(messages, model, image, Settings.Current.ToBackendOptions(),
+        var callbacks = new ChatCallbacks(
             token => Script($"appendToken({Js(token)})"),
-            isError => Script($"endStream({(isError ? "true" : "false")})"),
-            cts.Token);
+            notice =>
+            {
+                Logger.Write($"notice {notice}");
+                Script($"addNotice({Js(notice)})");
+            },
+            used => Script($"setActiveModel({Js(used)})"),
+            isError =>
+            {
+                Script($"endStream({(isError ? "true" : "false")})");
+                BeginInvoke(PersistCooldowns);
+            });
+        _ = new ChatRunner(router).RunAsync(messages, model, order, image, options, executor, callbacks, cts.Token);
     }
+
+    private ProjectTools? CreateProjectTools(Settings cfg)
+    {
+        if (cfg.ProjectFolder.Length == 0) return null;
+        try
+        {
+            return new ProjectTools(cfg.ProjectFolder, ConfirmChangeAsync)
+            {
+                Activity = line => Script($"addToolLine({Js(line)})"),
+            };
+        }
+        catch (Exception e) when (e is ToolException or IOException or UnauthorizedAccessException)
+        {
+            Logger.Error("project", e);
+            Script($"addSystemNotice({Js($"Project folder unavailable: {e.Message}")})");
+            return null;
+        }
+    }
+
+    private async Task<bool> ConfirmChangeAsync(PendingChange change, CancellationToken ct)
+    {
+        var id = Guid.NewGuid().ToString("N");
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        pendingChanges[id] = tcs;
+        var diff = new JsonArray(LineDiff.Compute(change.OldContent, change.NewContent)
+            .Select(d => (JsonNode)new JsonArray(d.Kind.ToString(), d.Text)).ToArray());
+        Script($"showChange({Js(id)},{Js(change.Path)},{(change.OldContent == null ? "true" : "false")},{diff.ToJsonString()})");
+
+        bool approved;
+        using (ct.Register(() => tcs.TrySetResult(false)))
+            approved = await tcs.Task;
+        pendingChanges.TryRemove(id, out _);
+        Logger.Write($"change {change.Path} approved={approved}");
+        Script($"changeResolved({Js(id)},{(approved ? "true" : "false")})");
+        return approved;
+    }
+
+    private void PersistCooldowns()
+    {
+        Settings.Current.ModelCooldowns = router.LongBlocks();
+        Settings.Current.Save();
+    }
+
+    private static string? SseLineText(JsonNode? node) =>
+        node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
 
     private void CaptureScreen()
     {

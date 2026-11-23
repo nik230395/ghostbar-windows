@@ -41,6 +41,10 @@ class SettingsForm : StealthForm
         Multiline = true, ReadOnly = true, Width = 420, Height = 150, ScrollBars = ScrollBars.Both,
         WordWrap = false, Font = new Font("Consolas", 8),
     };
+    private readonly TextBox projectBox = new() { Width = 300, Font = new Font("Consolas", 9) };
+    private readonly Label projectStatus = new() { AutoSize = true, ForeColor = Color.Gray };
+    private readonly CheckedListBox modelList = new() { Width = 300, Height = 220, CheckOnClick = true };
+    private bool orderChanged;
 
     public SettingsForm(GhostbarContext context)
     {
@@ -70,6 +74,10 @@ class SettingsForm : StealthForm
         systemBox.Text = cfg.SystemPrompt;
         screenshotBox.Text = cfg.ScreenshotPrompt;
         hint.Text = Presets[selected].Hint;
+        projectBox.Text = cfg.ProjectFolder;
+        projectStatus.Text = "The AI can read this folder; every change needs your approval.";
+        FillModelList(cfg.ModelOrder, cfg.DisabledModels);
+
         backendList.SelectedIndexChanged += (_, _) =>
         {
             var p = Presets[backendList.SelectedIndex];
@@ -87,19 +95,23 @@ class SettingsForm : StealthForm
         var save = new Button { Text = "Save", AutoSize = true, DialogResult = DialogResult.OK };
         var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
         var quit = new Button { Text = "Quit Ghostbar", AutoSize = true, ForeColor = Color.Salmon };
-        save.Click += (_, _) => Save();
+        save.Click += (_, _) => { if (!Save()) DialogResult = DialogResult.None; };
         quit.Click += (_, _) => context.Quit();
         AcceptButton = save;
         CancelButton = cancel;
 
-        var layout = new FlowLayoutPanel
-        {
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
-            AutoSize = true,
-            Dock = DockStyle.Fill,
-        };
-        layout.Controls.AddRange([
+        var browse = new Button { Text = "Browse…", AutoSize = true };
+        browse.Click += (_, _) => BrowseProject();
+        var clearProject = new Button { Text = "None", AutoSize = true };
+        clearProject.Click += (_, _) => projectBox.Text = "";
+        var up = new Button { Text = "▲", AutoSize = true };
+        up.Click += (_, _) => MoveModel(-1);
+        var down = new Button { Text = "▼", AutoSize = true };
+        down.Click += (_, _) => MoveModel(1);
+        var reset = new Button { Text = "Automatic order", AutoSize = true };
+        reset.Click += (_, _) => { orderChanged = true; FillModelList([], []); };
+
+        var left = Column(
             Caption("Backend"), backendList, urlBox, hint,
             Caption("API key"), keyBox,
             Row(testButton, status),
@@ -107,14 +119,18 @@ class SettingsForm : StealthForm
             Caption("Mic (in chat)"), micBox,
             Caption("Screenshot (in chat)"), captureBox,
             Caption("System prompt"), systemBox,
-            Row(Caption("Screenshot prompt"), defaultButton), screenshotBox,
+            Row(Caption("Screenshot prompt"), defaultButton), screenshotBox);
+        var right = Column(
+            Caption("Project folder"), projectBox, Row(browse, clearProject), projectStatus,
+            Caption("Model order for Auto (top first, uncheck to skip)"), modelList, Row(up, down, reset),
             Row(diagnose, new Label { Text = "Run checks, copy the result when asking for help", AutoSize = true, ForeColor = Color.Gray }),
-            report,
-            Row(quit, new Label { Width = 120 }, cancel, save),
-        ]);
+            report);
+        report.Width = 300;
+
+        var layout = Column(Row(left, right), Row(quit, new Label { Width = 360 }, cancel, save));
         Controls.Add(layout);
 
-        foreach (var box in new[] { urlBox, keyBox, systemBox, screenshotBox, toggleBox, micBox, captureBox, report })
+        foreach (var box in new[] { urlBox, keyBox, systemBox, screenshotBox, toggleBox, micBox, captureBox, report, projectBox })
         {
             box.BackColor = Color.FromArgb(30, 32, 38);
             box.ForeColor = Color.White;
@@ -122,7 +138,54 @@ class SettingsForm : StealthForm
         }
         backendList.BackColor = Color.FromArgb(30, 32, 38);
         backendList.ForeColor = Color.White;
-        foreach (var l in layout.Controls.OfType<Label>()) l.ForeColor = l == hint ? Color.Gray : Color.White;
+        modelList.BackColor = Color.FromArgb(30, 32, 38);
+        modelList.ForeColor = Color.White;
+        foreach (var l in Descendants(layout).OfType<Label>().Where(l => l.ForeColor == SystemColors.ControlText)) l.ForeColor = Color.White;
+    }
+
+    private static IEnumerable<Control> Descendants(Control parent) =>
+        parent.Controls.Cast<Control>().SelectMany(c => Descendants(c).Prepend(c));
+
+    private static FlowLayoutPanel Column(params Control[] controls)
+    {
+        var column = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
+        column.Controls.AddRange(controls);
+        return column;
+    }
+
+    private void FillModelList(IReadOnlyList<string> userOrder, IReadOnlyCollection<string> disabled)
+    {
+        modelList.Items.Clear();
+        foreach (var model in ModelRouter.Order(context.AvailableModels, userOrder, []))
+            modelList.Items.Add(model, !disabled.Contains(model));
+        if (modelList.Items.Count == 0) modelList.Items.Add("(no models loaded yet: save a backend and open the chat)", false);
+    }
+
+    private bool HasModels => context.AvailableModels.Count > 0;
+
+    private void MoveModel(int direction)
+    {
+        var index = modelList.SelectedIndex;
+        var target = index + direction;
+        if (!HasModels || index < 0 || target < 0 || target >= modelList.Items.Count) return;
+        var item = modelList.Items[index];
+        var isChecked = modelList.GetItemChecked(index);
+        modelList.Items.RemoveAt(index);
+        modelList.Items.Insert(target, item);
+        modelList.SetItemChecked(target, isChecked);
+        modelList.SelectedIndex = target;
+        orderChanged = true;
+    }
+
+    private void BrowseProject()
+    {
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = "Choose the project folder",
+            UseDescriptionForTitle = true,
+            SelectedPath = Directory.Exists(projectBox.Text) ? projectBox.Text : "",
+        };
+        if (dialog.ShowDialog(this) == DialogResult.OK) projectBox.Text = dialog.SelectedPath;
     }
 
     private static TextBox Multiline() => new()
@@ -161,8 +224,16 @@ class SettingsForm : StealthForm
         report.Text = await Diagnostics.BuildReportAsync(context.ChatHandle, context.HotKeyRegistered);
     }
 
-    private void Save()
+    private bool Save()
     {
+        var folder = projectBox.Text.Trim();
+        if (folder.Length > 0 && !Directory.Exists(folder))
+        {
+            projectStatus.ForeColor = Color.Salmon;
+            projectStatus.Text = "Folder not found.";
+            return false;
+        }
+
         var preset = Presets[backendList.SelectedIndex];
         var cfg = Settings.Current;
         cfg.BackendType = preset.Type;
@@ -173,7 +244,15 @@ class SettingsForm : StealthForm
         cfg.Toggle = toggleBox.Value;
         cfg.Mic = micBox.Value;
         cfg.Capture = captureBox.Value;
+        cfg.UseProject(folder);
+        if (HasModels)
+        {
+            var models = modelList.Items.Cast<string>().ToList();
+            cfg.DisabledModels = models.Where((_, i) => !modelList.GetItemChecked(i)).ToList();
+            if (orderChanged) cfg.ModelOrder = models;
+        }
         cfg.Save();
         context.ApplySettings();
+        return true;
     }
 }
