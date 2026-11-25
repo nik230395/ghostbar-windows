@@ -59,7 +59,15 @@ function WaitLog([string]$pattern, [int]$seconds = 20) {
 
 if (Test-Path $logPath) { Remove-Item $logPath -Force }
 
-$proc = Start-Process "publish\Ghostbar.exe" -PassThru
+$published = @(Get-ChildItem publish -Recurse -File | ForEach-Object { $_.Name })
+Check "Release is a single file (Ghostbar.exe)" ($published.Count -eq 1 -and $published[0] -eq "Ghostbar.exe") "files: $($published -join ', ')"
+
+$tempBase = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
+$solo = Join-Path $tempBase "ghostbar-solo"
+Remove-Item $solo -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $solo | Out-Null
+Copy-Item "publish\Ghostbar.exe" $solo
+$proc = Start-Process (Join-Path $solo "Ghostbar.exe") -WorkingDirectory $env:TEMP -PassThru
 Start-Sleep -Seconds 5
 Check "Process stays running after start" (-not $proc.HasExited) "exit code: $(if ($proc.HasExited) { $proc.ExitCode } else { 'running' })"
 Check "Start logged" (WaitLog "start v" 5)
@@ -70,7 +78,7 @@ Check "No visible window right after start" ($visibleBefore.Count -eq 0) "visibl
 
 [Win]::Chord()
 Check "Hotkey reaches the app" (WaitLog "toggle hotkey pressed" 10) "keyboard injection + RegisterHotKey"
-Check "WebView2 starts" (WaitLog "webview2 ready" 30) "runtime version in log"
+Check "WebView2 starts (loader taken from inside the exe)" (WaitLog "webview2 ready" 30) "runtime version in log"
 Check "Chat page loads" (WaitLog "page loaded success=True" 30)
 Check "JS bridge reaches C# (initModel)" (WaitLog "bridge initModel" 15)
 

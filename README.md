@@ -58,7 +58,7 @@ A line `Microsoft.WindowsDesktop.App 10.x.x` must appear. Without it, `Ghostbar.
 
 1. Download `Ghostbar-win-x64.zip` from the [Releases](../../releases) page.
 2. Right-click the ZIP, **Properties**, tick **Unblock** at the bottom (if present), **OK**.
-3. Extract the ZIP, e.g. to `C:\Tools\Ghostbar\`. Keep the **whole folder** together (`WebView2Loader.dll` sits next to `Ghostbar.exe`).
+3. Extract the ZIP, e.g. to `C:\Tools\Ghostbar\`. From v1.1.1 on it contains only `Ghostbar.exe`; everything it needs is inside.
 
 If there is no release yet, use option B or C. You can create a release like this (see option C for the ZIP):
 
@@ -79,7 +79,7 @@ cd ghostbar-windows
 
 If PowerShell blocks the script: `powershell -ExecutionPolicy Bypass -File build.ps1`.
 
-3. The result is the `publish\` folder containing `Ghostbar.exe`. Copy the whole folder to a permanent location, e.g. `C:\Tools\Ghostbar\`.
+3. The result is `publish\Ghostbar.exe`, a single file. Copy it to a permanent location, e.g. `C:\Tools\Ghostbar\`.
 
 #### Option C: build on macOS/Linux and copy to Windows
 
@@ -223,7 +223,7 @@ Runs entirely locally through [whisper.cpp](https://github.com/ggml-org/whisper.
 |---|---|
 | Hotkey does nothing | Is the app running? Task Manager, Details, `Ghostbar.exe`. If it is there, another program is using the shortcut. Set a different shortcut in Settings. |
 | `Ghostbar.exe` does not start, no message | .NET 10 Desktop Runtime is missing: check `dotnet --list-runtimes`. |
-| Chat stays empty or white | WebView2 Runtime is missing or too old: `winget install Microsoft.EdgeWebView2Runtime`. |
+| Chat stays empty, white or black | From v1.1.1 on a message shows the cause. Usually the WebView2 Runtime is missing or too old: `winget install Microsoft.EdgeWebView2Runtime`. In v1.1.0 and older, `WebView2Loader.dll` was missing next to the exe; update to v1.1.1. |
 | Test shows "HTTP 401" | Wrong key, or a key for another backend. |
 | Test shows a connection error | The server is not running (start Ollama/LM Studio) or the URL is wrong. |
 | Model list empty ("no models") | Run Test first, then Save. With Ollama, at least one model must be available. |

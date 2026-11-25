@@ -58,7 +58,7 @@ Es muss eine Zeile `Microsoft.WindowsDesktop.App 10.x.x` erscheinen. Ohne diese 
 
 1. Auf der Seite [Releases](../../releases) die Datei `Ghostbar-win-x64.zip` herunterladen.
 2. Rechtsklick auf die ZIP, **Eigenschaften**, unten **Zulassen** anhaken (falls vorhanden), **OK**.
-3. ZIP entpacken, z. B. nach `C:\Tools\Ghostbar\`. Der **ganze Ordner** muss zusammenbleiben (neben `Ghostbar.exe` liegt `WebView2Loader.dll`).
+3. ZIP entpacken, z. B. nach `C:\Tools\Ghostbar\`. Ab v1.1.1 enthält sie nur noch `Ghostbar.exe`, alles Nötige steckt darin.
 
 Gibt es noch kein Release, nimm Variante B oder C. Ein Release erzeugst du so (siehe Variante C für das ZIP):
 
@@ -79,7 +79,7 @@ cd ghostbar-windows
 
 Falls PowerShell das Skript blockiert: `powershell -ExecutionPolicy Bypass -File build.ps1`.
 
-3. Ergebnis ist der Ordner `publish\` mit `Ghostbar.exe`. Kopiere ihn komplett an einen festen Ort, z. B. `C:\Tools\Ghostbar\`.
+3. Ergebnis ist `publish\Ghostbar.exe`, eine einzelne Datei. Kopiere sie an einen festen Ort, z. B. `C:\Tools\Ghostbar\`.
 
 #### Variante C: auf macOS/Linux bauen und auf Windows kopieren
 
@@ -223,7 +223,7 @@ Läuft komplett lokal über [whisper.cpp](https://github.com/ggml-org/whisper.cp
 |---|---|
 | Hotkey tut nichts | Läuft die App? Task-Manager, Details, `Ghostbar.exe`. Ist sie da, belegt ein anderes Programm das Kürzel. In den Settings ein anderes Kürzel setzen. |
 | `Ghostbar.exe` startet nicht, keine Meldung | .NET 10 Desktop Runtime fehlt: `dotnet --list-runtimes` prüfen. |
-| Chat bleibt leer oder weiß | WebView2 Runtime fehlt oder ist zu alt: `winget install Microsoft.EdgeWebView2Runtime`. |
+| Chat bleibt leer, weiß oder schwarz | Ab v1.1.1 erscheint eine Meldung mit der Ursache. Meist fehlt die WebView2 Runtime oder ist zu alt: `winget install Microsoft.EdgeWebView2Runtime`. In v1.1.0 und älter: `WebView2Loader.dll` fehlte neben der Exe, auf v1.1.1 aktualisieren. |
 | Test zeigt „HTTP 401“ | Key falsch oder für anderes Backend. |
 | Test zeigt Verbindungsfehler | Server läuft nicht (Ollama/LM Studio starten) oder URL falsch. |
 | Modellliste leer („no models“) | Test zuerst ausführen, dann Save. Bei Ollama muss mindestens ein Modell geladen sein. |

@@ -20,6 +20,7 @@ static class Diagnostics
         var os = Environment.OSVersion.Version;
         Line("Windows build", $"{os} (needs >= 10.0.19041)", os.Build >= 19041);
         Line(".NET runtime", RuntimeInformation.FrameworkDescription);
+        Line("Architecture", $"app {RuntimeInformation.ProcessArchitecture}, Windows {RuntimeInformation.OSArchitecture}");
 
         try
         {

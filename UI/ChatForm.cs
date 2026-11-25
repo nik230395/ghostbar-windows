@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Ghostbar.App;
@@ -61,12 +62,24 @@ class ChatForm : StealthForm
         {
             await StartWebViewAsync();
         }
-        catch (Exception e) when (e is WebView2RuntimeNotFoundException or System.Runtime.InteropServices.COMException or InvalidOperationException)
+        catch (Exception e)
         {
             Logger.Error("webview2 init", e);
-            MessageBox.Show("The WebView2 runtime is missing or broken, so the chat cannot be shown.\n\nInstall it with:\nwinget install Microsoft.EdgeWebView2Runtime", "Ghostbar", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            Logger.Write($"webview2 init details: {e}");
+            MessageBox.Show(this, WebViewErrorText(e), "Ghostbar", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
+
+    private static string WebViewErrorText(Exception e) => e switch
+    {
+        WebView2RuntimeNotFoundException =>
+            "The WebView2 runtime is missing, so the chat cannot be shown.\n\nInstall it with:\nwinget install Microsoft.EdgeWebView2Runtime",
+        DllNotFoundException or BadImageFormatException =>
+            $"WebView2Loader.dll could not be loaded, so the chat cannot be shown.\n\n{e.Message}\n\n" +
+            $"App: {RuntimeInformation.ProcessArchitecture}, Windows: {RuntimeInformation.OSArchitecture}\n" +
+            "Antivirus software may have blocked or removed the file. Download the release again and send the log if it persists.",
+        _ => $"The chat could not be started.\n\n{e.GetType().Name}: {e.Message}\n\nLog: {Logger.FilePath}",
+    };
 
     private async Task StartWebViewAsync()
     {
